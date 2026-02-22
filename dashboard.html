@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Despachos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="styles.css">
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+></script>
+</head>
+<body>
+
+<div class="dashboard-container">
+
+    <nav class="dashboard-nav">
+        <h1>App de Despachos</h1>
+        <div>
+            <span id="networkStatus" class="network-badge online">En linea</span>
+            <span id="userEmail"></span>
+            <button onclick="logout()" class="btn-logout">Salir</button>
+        </div>
+    </nav>
+
+    <div class="dashboard-content">
+        <div class="session-tabs">
+            <button id="sessionManagerBtn" class="session-tab" type="button">Control gestor</button>
+            <button id="sessionDispatchBtn" class="session-tab active" type="button">Gestion de despachos</button>
+            <button id="sessionSalidasBtn" class="session-tab" type="button">Lista de salidas</button>
+            <button id="sessionMissingBtn" class="session-tab" type="button">Sin pasajeros</button>
+            <button id="sessionFleetBtn" class="session-tab" type="button">Parque automotor</button>
+            <button id="sessionSicovBtn" class="session-tab" type="button">Preoperacionales SICOV</button>
+            <button id="sessionExternalVcBtn" class="session-tab" type="button">Vehiculo-Conductores</button>
+            <button id="sessionUpdatesBtn" class="session-tab" type="button">Actualizaciones</button>
+        </div>
+
+        <section id="managerSession" class="session-view">
+            <section class="card">
+                <h2>Control de gestor</h2>
+                <div class="manager-grid">
+                    <input type="text" id="managerCedula" placeholder="Cedula">
+                    <input type="text" id="managerFullName" placeholder="Nombre completo">
+                    <select id="managerItineraryGroup">
+                        <option value="">Todos los grupos</option>
+                    </select>
+                    <button type="button" id="saveManagerBtn" class="btn-secondary">Guardar datos</button>
+                    <button type="button" id="startShiftBtn" class="btn-primary">Iniciar turno</button>
+                    <button type="button" id="endShiftBtn" class="btn-secondary">Finalizar turno</button>
+                </div>
+                <p id="managerStatus" class="driver-info">Cargando estado del gestor...</p>
+            </section>
+
+            <section class="card">
+                <h2>Registros de labores</h2>
+                <div id="managerShiftHistory" class="manager-shift-history"></div>
+                <div class="history-pagination">
+                    <button type="button" id="shiftPrevBtn" class="btn-secondary">Anterior</button>
+                    <span id="shiftPageInfo">Pagina 1</span>
+                    <button type="button" id="shiftNextBtn" class="btn-secondary">Siguiente</button>
+                </div>
+            </section>
+        </section>
+
+        <section id="dispatchSession" class="session-view active">
+            <section id="dispatchLockedNotice" class="card" style="display:none;">
+                <h2>Gestion de despachos</h2>
+                <p id="dispatchLockedText" class="driver-info">Debes iniciar turno en la pestaña Control gestor para habilitar esta seccion.</p>
+            </section>
+
+            <section id="dispatchFormCard" class="card">
+                <h2>Nuevo despacho</h2>
+
+                <div class="steps-header">
+                    <span id="stepIndicator" class="step-indicator">Paso 1 de 2</span>
+                </div>
+
+                <form id="dispatchForm" class="dispatch-form">
+                    <div class="form-step active" data-step="1">
+                        <select id="vehicle" required>
+                            <option value="">Selecciona vehiculo</option>
+                        </select>
+                        <button type="button" id="scanVehicleQrBtn" class="btn-secondary">Leer QR vehiculo</button>
+                        <p id="vehicleInfo" class="driver-info">Cargando vehiculos...</p>
+                        <div id="vehicleDocsPanel" class="vehicle-docs" style="display:none;"></div>
+
+                        <select id="driver" required>
+                            <option value="">Selecciona conductor</option>
+                        </select>
+                        <p id="driverInfo" class="driver-info">Cargando conductores...</p>
+
+                        <input type="text" id="departureDate" readonly aria-readonly="true" placeholder="Fecha (DD/MM/YYYY)">
+                        <input type="time" id="departureTime" step="60" required>
+                    </div>
+
+                    <div class="form-step" data-step="2">
+                        <select id="route" required>
+                            <option value="">Selecciona itinerario</option>
+                        </select>
+                        <input type="number" id="passengerCount" min="1" placeholder="Cantidad de pasajeros (opcional)">
+                        <input type="text" id="manager" placeholder="Gestor (autocompletado)" readonly>
+                        <textarea id="notes" rows="3" placeholder="Observaciones"></textarea>
+                    </div>
+
+                    <div class="step-actions">
+                        <button type="button" id="prevStepBtn" class="btn-secondary" disabled>Atras</button>
+                        <button type="button" id="nextStepBtn" class="btn-primary">Siguiente</button>
+                        <button type="submit" id="submitDispatchBtn" class="btn-primary" style="display:none;">Guardar despacho</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="dispatchListCard" class="card">
+                <h2>Despachos registrados</h2>
+                <div class="dispatch-filters dispatch-filters-advanced">
+                    <input type="date" id="dispatchDateFilter">
+                    <select id="dispatchItineraryFilter">
+                        <option value="">Todos los itinerarios</option>
+                    </select>
+                </div>
+                <div id="passengerAlert" class="passenger-alert" style="display:none;"></div>
+                <div id="dispatchesList" class="dispatches-list"></div>
+                <div class="dispatch-pagination">
+                    <button type="button" id="dispatchPrevBtn" class="btn-secondary">Anterior</button>
+                    <span id="dispatchPageInfo">Pagina 1</span>
+                    <button type="button" id="dispatchNextBtn" class="btn-secondary">Siguiente</button>
+                </div>
+            </section>
+        </section>
+
+        <section id="salidasSession" class="session-view">
+            <section class="card">
+                <h2>Lista de salidas</h2>
+                <div class="dispatch-filters">
+                    <select id="itineraryFilter">
+                        <option value="">Todos los itinerarios</option>
+                    </select>
+                </div>
+                <div id="salidasList" class="salidas-list"></div>
+            </section>
+        </section>
+
+        <section id="fleetSession" class="session-view">
+            <section class="card">
+                <h2>Parque automotor</h2>
+                <p id="fleetStatus" class="driver-info">Cargando parque automotor...</p>
+                <div id="fleetList" class="fleet-list"></div>
+            </section>
+        </section>
+
+        <section id="sicovSession" class="session-view">
+            <section class="card">
+                <h2>Preoperacionales SICOV</h2>
+                <input type="text" id="sicovFilter" placeholder="Filtrar por vehiculo, placa, conductor o texto">
+                <p id="sicovStatus" class="driver-info">Cargando preoperacionales SICOV...</p>
+                <div id="sicovList" class="fleet-list"></div>
+            </section>
+        </section>
+
+        <section id="externalVcSession" class="session-view">
+            <section class="card">
+                <h2>Vehiculo-Conductores</h2>
+                <input type="text" id="externalVcFilter" placeholder="Filtrar por vehiculo, cedula, nombre o texto">
+                <p id="externalVcStatus" class="driver-info">Cargando datos de vehiculo_conductores...</p>
+                <div id="externalVcList" class="fleet-list"></div>
+            </section>
+        </section>
+
+        <section id="updatesSession" class="session-view">
+            <section class="card csv-refresh-card">
+                <h2>Actualizaciones</h2>
+                <div class="csv-actions">
+                    <button id="refreshAllCsvBtn" type="button" class="btn-primary">Actualizar todo</button>
+                    <button id="refreshVehiclesCsvBtn" type="button" class="btn-secondary">Actualizar vehiculos</button>
+                    <button id="refreshDriversCsvBtn" type="button" class="btn-secondary">Actualizar conductores</button>
+                    <button id="refreshFleetCsvBtn" type="button" class="btn-secondary">Actualizar parque automotor</button>
+                    <button id="refreshSicovCsvBtn" type="button" class="btn-secondary">Actualizar SICOV</button>
+                    <button id="refreshExternalVcBtn" type="button" class="btn-secondary">Actualizar Vehiculo-Conductores</button>
+                </div>
+            </section>
+        </section>
+
+        <section id="missingSession" class="session-view">
+            <section class="card">
+                <h2>Viajes sin pasajeros</h2>
+                <div class="dispatch-filters">
+                    <select id="missingItineraryFilter">
+                        <option value="">Todos los itinerarios</option>
+                    </select>
+                </div>
+                <div id="missingPassengerList" class="missing-passenger-list"></div>
+            </section>
+        </section>
+    </div>
+</div>
+
+<div id="dispatchConfirmModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+        <h3>Verificar despacho</h3>
+        <p id="dispatchConfirmText">Existe un despacho cercano para este vehiculo.</p>
+        <div class="modal-actions">
+            <button type="button" id="dispatchConfirmCancel" class="btn-secondary">Cancelar</button>
+            <button type="button" id="dispatchConfirmOk" class="btn-primary">Despachar de todos modos</button>
+        </div>
+    </div>
+</div>
+
+<div id="qrScannerModal" class="modal-overlay" style="display:none;">
+    <div class="modal-card qr-modal-card">
+        <h3>Escanear QR de vehiculo</h3>
+        <p id="qrScannerStatus">Apunta la camara al codigo QR del vehiculo.</p>
+        <video id="qrScannerVideo" autoplay playsinline muted></video>
+        <div class="modal-actions">
+            <button type="button" id="qrScannerClose" class="btn-secondary">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<script src="dashboard.config.js"></script>
+<script src="dashboard.helpers.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>
