@@ -1,4 +1,4 @@
-﻿const {
+const {
     SUPABASE_URL,
     SUPABASE_KEY,
     DRIVERS_CSV_URL,
@@ -307,39 +307,48 @@ async function scanQrFrame() {
             qrDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
         }
 
+        let detectedValue = '';
+        let barcodeDetectorFailed = false;
+
         if (qrDetector) {
-            const results = await qrDetector.detect(qrCanvas);
-            if (results && results.length > 0) {
-                const value = String(results[0].rawValue || '').trim();
-                if (value) {
-                    const ok = applyScannedVehicle(value);
-                    if (ok) {
-                        qrScannerStatus.textContent = 'QR detectado, seleccionando vehiculo...';
-                        await stopQrScanner();
-                        alert(`Vehiculo seleccionado por QR: ${value}`);
-                        return;
-                    }
+            try {
+                const results = await qrDetector.detect(qrCanvas);
+                if (results && results.length > 0) {
+                    detectedValue = String(results[0].rawValue || '').trim();
                 }
+            } catch (detectorErr) {
+                barcodeDetectorFailed = true;
+                // En algunos navegadores el servicio interno de BarcodeDetector falla en runtime.
+                // Desactivamos ese motor para continuar con jsQR sin interrumpir al usuario.
+                qrDetector = null;
             }
-        } else if (typeof window.jsQR === 'function') {
+        }
+
+        if (!detectedValue && typeof window.jsQR === 'function') {
             const imgData = qrCanvasCtx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
             const decoded = window.jsQR(imgData.data, imgData.width, imgData.height, {
                 inversionAttempts: 'dontInvert'
             });
             if (decoded && decoded.data) {
-                const value = String(decoded.data).trim();
-                const ok = applyScannedVehicle(value);
-                if (ok) {
-                    qrScannerStatus.textContent = 'QR detectado, seleccionando vehiculo...';
-                    await stopQrScanner();
-                    alert(`Vehiculo seleccionado por QR: ${value}`);
-                    return;
-                }
+                detectedValue = String(decoded.data).trim();
             }
-        } else {
+            if (barcodeDetectorFailed) {
+                qrScannerStatus.textContent = 'Usando modo de escaneo compatible...';
+            }
+        } else if (!detectedValue && !qrDetector) {
             qrScannerStatus.textContent = 'No hay motor de lectura QR disponible en este navegador.';
             scheduleQrScanLoop();
             return;
+        }
+
+        if (detectedValue) {
+            const ok = applyScannedVehicle(detectedValue);
+            if (ok) {
+                qrScannerStatus.textContent = 'QR detectado, seleccionando vehiculo...';
+                await stopQrScanner();
+                alert(`Vehiculo seleccionado por QR: ${detectedValue}`);
+                return;
+            }
         }
     } catch (err) {
         qrScannerStatus.textContent = `Error de escaneo: ${err.message}`;
@@ -2121,5 +2130,9 @@ window.logout = async function () {
 };
 
 init();
+
+
+
+
 
 
