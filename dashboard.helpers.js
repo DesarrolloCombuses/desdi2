@@ -1,7 +1,16 @@
 (function () {
     function formatDate(value) {
         if (!value) return '-';
-        const date = new Date(value);
+        const raw = String(value).trim();
+
+        // Si viene solo fecha (YYYY-MM-DD), no convertir zona horaria
+        // para evitar desfase de un dia al mostrar en America/Bogota.
+        const onlyDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (onlyDate) {
+            return `${onlyDate[3]}/${onlyDate[2]}/${onlyDate[1]}`;
+        }
+
+        const date = new Date(raw);
         if (Number.isNaN(date.getTime())) return value;
         return date.toLocaleDateString('es-CO', {
             timeZone: 'America/Bogota',
