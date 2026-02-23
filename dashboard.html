@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -48,12 +48,10 @@
             <section class="card">
                 <h2>Control de gestor</h2>
                 <div class="manager-grid">
-                    <input type="text" id="managerCedula" placeholder="Cedula">
-                    <input type="text" id="managerFullName" placeholder="Nombre completo">
+                    <p id="managerIdentity" class="driver-info">Gestor: -</p>
                     <select id="managerItineraryGroup">
                         <option value="">Todos los grupos</option>
                     </select>
-                    <button type="button" id="saveManagerBtn" class="btn-secondary">Guardar datos</button>
                     <button type="button" id="startShiftBtn" class="btn-primary">Iniciar turno</button>
                     <button type="button" id="endShiftBtn" class="btn-secondary">Finalizar turno</button>
                 </div>
@@ -80,42 +78,36 @@
             <section id="dispatchFormCard" class="card">
                 <h2>Nuevo despacho</h2>
 
-                <div class="steps-header">
-                    <span id="stepIndicator" class="step-indicator">Paso 1 de 2</span>
-                </div>
-
                 <form id="dispatchForm" class="dispatch-form">
-                    <div class="form-step active" data-step="1">
-                        <select id="vehicle" required>
-                            <option value="">Selecciona vehiculo</option>
-                        </select>
-                        <button type="button" id="scanVehicleQrBtn" class="btn-secondary">Leer QR vehiculo</button>
-                        <p id="vehicleInfo" class="driver-info">Cargando vehiculos...</p>
-                        <div id="vehicleDocsPanel" class="vehicle-docs" style="display:none;"></div>
+                    <p class="form-guide">Completa en este orden: Vehiculo, conductor, hora, ruta y observaciones.</p>
+                    <select id="vehicle" required>
+                        <option value="">1) Selecciona vehiculo</option>
+                    </select>
+                    <button type="button" id="scanVehicleQrBtn" class="btn-secondary">Leer QR vehiculo</button>
+                    <p id="vehicleInfo" class="driver-info">Cargando vehiculos...</p>
+                    <p id="vehicleSelectedMeta" class="driver-info">ID vehiculo: -</p>
+                    <div id="vehicleDocsPanel" class="vehicle-docs" style="display:none;"></div>
 
-                        <select id="driver" required>
-                            <option value="">Selecciona conductor</option>
-                        </select>
-                        <p id="driverInfo" class="driver-info">Cargando conductores...</p>
+                    <select id="driver" required>
+                        <option value="">2) Selecciona conductor</option>
+                    </select>
+                    <p id="driverInfo" class="driver-info">Cargando conductores...</p>
+                    <p id="driverSelectedMeta" class="driver-info">ID conductor: -</p>
 
-                        <input type="text" id="departureDate" readonly aria-readonly="true" placeholder="Fecha (DD/MM/YYYY)">
-                        <input type="time" id="departureTime" step="60" required>
-                    </div>
+                    <label for="departureDate">3) Fecha de salida</label>
+                    <input type="text" id="departureDate" placeholder="Fecha (DD/MM/YYYY)">
 
-                    <div class="form-step" data-step="2">
-                        <select id="route" required>
-                            <option value="">Selecciona itinerario</option>
-                        </select>
-                        <input type="number" id="passengerCount" min="1" placeholder="Cantidad de pasajeros (opcional)">
-                        <input type="text" id="manager" placeholder="Gestor (autocompletado)" readonly>
-                        <textarea id="notes" rows="3" placeholder="Observaciones"></textarea>
-                    </div>
+                    <label for="departureTime">4) Hora de salida del vehiculo</label>
+                    <input type="time" id="departureTime" step="60" required aria-label="Hora de salida del vehiculo">
 
-                    <div class="step-actions">
-                        <button type="button" id="prevStepBtn" class="btn-secondary" disabled>Atras</button>
-                        <button type="button" id="nextStepBtn" class="btn-primary">Siguiente</button>
-                        <button type="submit" id="submitDispatchBtn" class="btn-primary" style="display:none;">Guardar despacho</button>
-                    </div>
+                    <select id="route" required>
+                        <option value="">5) Selecciona itinerario</option>
+                    </select>
+                    <p id="routeSelectedMeta" class="driver-info">ID itinerario: -</p>
+                    <input type="text" id="manager" placeholder="Gestor (autocompletado)" readonly>
+                    <textarea id="notes" rows="3" placeholder="Observaciones"></textarea>
+
+                    <button type="submit" id="submitDispatchBtn" class="btn-primary">Realizar Despacho</button>
                 </form>
             </section>
 
@@ -123,6 +115,7 @@
                 <h2>Despachos registrados</h2>
                 <div class="dispatch-filters dispatch-filters-advanced">
                     <input type="date" id="dispatchDateFilter">
+                    <input type="text" id="dispatchManagerFilter" placeholder="Filtrar por usuario/gestor">
                     <select id="dispatchItineraryFilter">
                         <option value="">Todos los itinerarios</option>
                     </select>
@@ -231,3 +224,4 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
