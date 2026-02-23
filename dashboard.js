@@ -170,6 +170,8 @@ let vehicleDriverLookupSeq = 0;
 let dispatchSubmitInFlight = false;
 let managerShiftActionInFlight = false;
 let loginLockHeartbeatTimer = null;
+let externalVcLoading = false;
+let externalVcAutoRefreshTimer = null;
 
 if (
     !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !routeInput || !routeSelectedMeta ||
@@ -249,6 +251,38 @@ function getDepartureIsoFromDateAndTime(dateValue, timeValue) {
     const year = match[3];
     // Guardamos la hora seleccionada como hora de Colombia (-05:00) para evitar desfases.
     return `${year}-${month}-${day}T${timeValue}:00-05:00`;
+}
+
+function getCurrentDateKeyBogota() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value || '';
+    const m = parts.find((p) => p.type === 'month')?.value || '';
+    const d = parts.find((p) => p.type === 'day')?.value || '';
+    return `${y}-${m}-${d}`;
+}
+
+function getActiveDispatchDateKey() {
+    return String(dispatchDateFilter.value || '').trim() || getCurrentDateKeyBogota();
+}
+
+function getDateRangeIsoBogota(dateKey) {
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || ''));
+    if (!dateMatch) return null;
+    const y = Number(dateMatch[1]);
+    const m = Number(dateMatch[2]);
+    const d = Number(dateMatch[3]);
+    const start = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T00:00:00-05:00`;
+    const next = new Date(Date.UTC(y, m - 1, d + 1, 5, 0, 0));
+    const yy = next.getUTCFullYear();
+    const mm = String(next.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(next.getUTCDate()).padStart(2, '0');
+    const end = `${yy}-${mm}-${dd}T00:00:00-05:00`;
+    return { start, end };
 }
 
 function buildDispatchNotesWithMethod(userText) {
@@ -582,6 +616,10 @@ function setSessionView(view) {
     sessionSicovBtn.classList.toggle('active', isSicov);
     sessionExternalVcBtn.classList.toggle('active', isExternalVc);
     sessionUpdatesBtn.classList.toggle('active', isUpdates);
+
+    if (isExternalVc) {
+        loadExternalVehiculoConductores();
+    }
 }
 
 function setDispatchAvailability() {
@@ -1363,16 +1401,82 @@ function getSelectedVehicleNumber() {
 
 async function findExternalDriverByVehicle(vehicleNumber) {
     if (!sbExternal || !Number.isInteger(vehicleNumber)) return null;
+
+    const cached = externalVcRows
+        .filter((row) => Number(String(row.vehiculo || '').trim()) === vehicleNumber)
+        .sort((a, b) => {
+            const aTs = new Date(a.created_at || 0).getTime();
+            const bTs = new Date(b.created_at || 0).getTime();
+            return bTs - aTs;
+        })[0] || null;
+
+    if (cached) {
+        // Refresco puntual en segundo plano para este vehiculo sin bloquear el flujo.
+        refreshExternalVehiculoConductoresByVehicle(vehicleNumber).catch(() => {});
+        return cached;
+    }
+
+    return refreshExternalVehiculoConductoresByVehicle(vehicleNumber);
+}
+
+function mergeExternalVehiculoConductoresRows(rows) {
+    if (!rows || rows.length === 0) return;
+
+    const incomingHeaders = Object.keys(rows[0] || {});
+    if (externalVcHeaders.length === 0) {
+        externalVcHeaders = [...incomingHeaders];
+    } else {
+        incomingHeaders.forEach((h) => {
+            if (!externalVcHeaders.includes(h)) externalVcHeaders.push(h);
+        });
+    }
+
+    const mapKey = (row) => String(
+        row.turno_id ||
+        `${row.vehiculo || ''}|${row.cedula || ''}|${row.fecha_ingreso || ''}|${row.hora_ingreso || ''}|${row.created_at || ''}`
+    );
+
+    const existingMap = new Map(
+        externalVcRows.map((row) => [mapKey(row), row])
+    );
+
+    rows.forEach((raw) => {
+        const mapped = {};
+        externalVcHeaders.forEach((header) => {
+            mapped[header] = raw[header] === null || raw[header] === undefined ? '' : String(raw[header]);
+        });
+        existingMap.set(mapKey(mapped), mapped);
+    });
+
+    externalVcRows = Array.from(existingMap.values()).sort((a, b) => {
+        const aTs = new Date(a.created_at || 0).getTime();
+        const bTs = new Date(b.created_at || 0).getTime();
+        return bTs - aTs;
+    });
+
+    externalVcStatus.textContent = `${externalVcRows.length} registros disponibles.`;
+    if (externalVcSession.classList.contains('active')) {
+        renderExternalVcRows();
+    }
+}
+
+async function refreshExternalVehiculoConductoresByVehicle(vehicleNumber) {
+    if (!sbExternal || !Number.isInteger(vehicleNumber)) return null;
     const tableVehiculoConductores = String(EXT_VEHICULO_CONDUCTORES_TABLE || 'vehiculo_conductores').trim();
     const { data, error } = await sbExternal
         .from(tableVehiculoConductores)
-        .select('vehiculo, cedula, nombre, email, created_at, fecha_ingreso, hora_ingreso')
+        .select('*')
         .eq('vehiculo', vehicleNumber)
         .order('created_at', { ascending: false })
-        .limit(1);
+        .limit(5);
 
     if (error) throw error;
-    return data && data[0] ? data[0] : null;
+    const rows = data || [];
+    if (rows.length === 0) return null;
+
+    mergeExternalVehiculoConductoresRows(rows);
+
+    return rows[0];
 }
 
 function selectDriverFromCsvByExternalRow(row) {
@@ -1399,12 +1503,14 @@ async function autoFillDriverFromExternalByVehicle() {
     if (!sbExternal) return;
     const vehicleNumber = getSelectedVehicleNumber();
     if (!Number.isInteger(vehicleNumber)) return;
+    const hasDriverSelected = String(driver.value || '').trim() !== '';
 
     try {
         const externalRow = await findExternalDriverByVehicle(vehicleNumber);
         if (requestId !== vehicleDriverLookupSeq) return;
 
         if (externalRow) {
+            if (hasDriverSelected) return;
             const matched = selectDriverFromCsvByExternalRow(externalRow);
             if (matched) {
                 alert(`Conductor autocompletado desde biometrico para vehiculo ${vehicleNumber}.`);
@@ -1414,6 +1520,8 @@ async function autoFillDriverFromExternalByVehicle() {
             alert(`Se encontro conductor en biometrico (${externalRow.nombre}), pero no esta en la lista de conductores.`);
             return;
         }
+
+        if (hasDriverSelected) return;
 
         const goManual = confirm(
             `No se encontro conductor en biometrico para el vehiculo ${vehicleNumber}. ¿Deseas registrarlo manualmente desde la lista de conductores?`
@@ -1648,11 +1756,14 @@ function renderExternalVcRows() {
 }
 
 async function loadExternalVehiculoConductores() {
+    if (externalVcLoading) return;
+    externalVcLoading = true;
     if (!sbExternal) {
         externalVcHeaders = [];
         externalVcRows = [];
         externalVcStatus.textContent = 'No hay configuracion disponible para esta consulta.';
         renderExternalVcRows();
+        externalVcLoading = false;
         return;
     }
 
@@ -1690,7 +1801,23 @@ async function loadExternalVehiculoConductores() {
         externalVcRows = [];
         externalVcStatus.textContent = `No se pudo cargar vehiculo_conductores. (${err.message})`;
         renderExternalVcRows();
+    } finally {
+        externalVcLoading = false;
     }
+}
+
+function startExternalVcAutoRefresh() {
+    if (externalVcAutoRefreshTimer) {
+        clearInterval(externalVcAutoRefreshTimer);
+        externalVcAutoRefreshTimer = null;
+    }
+
+    // Refresco suave de biometrico externo para mantener datos al dia.
+    externalVcAutoRefreshTimer = setInterval(() => {
+        if (document.hidden) return;
+        if (!sbExternal) return;
+        loadExternalVehiculoConductores();
+    }, 90000);
 }
 
 function setCsvButtonsDisabled(disabled) {
@@ -1768,7 +1895,7 @@ async function init() {
     setSessionView('dispatch');
     loadItineraryGroups();
     loadItineraries();
-    dispatchDateFilter.value = '';
+    dispatchDateFilter.value = getCurrentDateKeyBogota();
     dispatchManagerFilter.value = '';
     dispatchItineraryFilter.value = '';
     try {
@@ -1797,23 +1924,32 @@ async function init() {
     await loadFleetFromSheet();
     await loadSicovFromSheet();
     await loadExternalVehiculoConductores();
+    startExternalVcAutoRefresh();
     await loadDispatches();
 }
 
-async function fetchAllDispatches() {
+async function fetchAllDispatchesByDate(dateKey) {
+    const range = getDateRangeIsoBogota(dateKey);
+    if (!range) return { rows: [], count: 0 };
+
+    const columns = 'id,user_id,vehicle,departure_time,hora_salida,route,driver,passenger_count,manager,notes,is_canceled,cancellation_note,created_at';
     const pageSize = 1000;
     let from = 0;
     const rows = [];
+    let totalCount = 0;
 
     while (true) {
         const to = from + pageSize - 1;
-        const { data, error } = await sb
+        const { data, error, count } = await sb
             .from('dispatches')
-            .select('*')
+            .select(columns, { count: from === 0 ? 'exact' : null })
+            .gte('departure_time', range.start)
+            .lt('departure_time', range.end)
             .order('id', { ascending: false })
             .range(from, to);
 
         if (error) throw error;
+        if (from === 0 && typeof count === 'number') totalCount = count;
         if (!data || data.length === 0) break;
 
         rows.push(...data);
@@ -1821,13 +1957,17 @@ async function fetchAllDispatches() {
         from += pageSize;
     }
 
-    return rows;
+    return { rows, count: totalCount || rows.length };
 }
 
 async function loadDispatches() {
+    const activeDate = getActiveDispatchDateKey();
+    dispatchDateFilter.value = activeDate;
+
     let data = [];
     try {
-        data = await fetchAllDispatches();
+        const result = await fetchAllDispatchesByDate(activeDate);
+        data = result.rows;
     } catch (err) {
         alert(err.message);
         return;
@@ -1840,8 +1980,10 @@ async function loadDispatches() {
         dispatchesCache = [];
         renderItineraryFilter([]);
         renderDispatchFilters([]);
+        renderMissingItineraryFilter([]);
         dispatchesList.innerHTML = '<div class="no-tasks">No hay despachos registrados.</div>';
         salidasList.innerHTML = '<div class="no-tasks">No hay salidas disponibles.</div>';
+        missingPassengerList.innerHTML = '<div class="no-tasks">No hay viajes sin pasajeros.</div>';
         return;
     }
 
@@ -1867,7 +2009,7 @@ function renderDispatches() {
     }
 
     const filtered = dispatchesCache.filter((item) => {
-        const byDate = matchesDispatchDate(item, dispatchDateFilter.value);
+        const byDate = matchesDispatchDate(item, getActiveDispatchDateKey());
         const managerQuery = normalizeText(dispatchManagerFilter.value);
         const managerText = normalizeText(item.manager || item.user_id || '');
         const byManager = managerQuery ? managerText.includes(managerQuery) : true;
@@ -2058,7 +2200,7 @@ managerItineraryGroup.addEventListener('change', () => {
     renderRouteSelectedMeta();
 });
 itineraryFilter.addEventListener('change', renderSalidas);
-dispatchDateFilter.addEventListener('change', resetDispatchPaginationAndRender);
+dispatchDateFilter.addEventListener('change', () => { loadDispatches(); });
 dispatchManagerFilter.addEventListener('input', resetDispatchPaginationAndRender);
 dispatchItineraryFilter.addEventListener('change', resetDispatchPaginationAndRender);
 sessionManagerBtn.addEventListener('click', () => setSessionView('manager'));
@@ -2098,11 +2240,20 @@ refreshSicovCsvBtn.addEventListener('click', () => refreshCsv('sicov'));
 refreshExternalVcBtn.addEventListener('click', () => refreshCsv('external-vc'));
 window.addEventListener('offline', () => updateNetworkStatus(true));
 window.addEventListener('online', () => updateNetworkStatus(true));
+window.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        loadExternalVehiculoConductores();
+    }
+});
 window.addEventListener('beforeunload', () => {
     stopQrScanner();
     if (loginLockHeartbeatTimer) {
         clearInterval(loginLockHeartbeatTimer);
         loginLockHeartbeatTimer = null;
+    }
+    if (externalVcAutoRefreshTimer) {
+        clearInterval(externalVcAutoRefreshTimer);
+        externalVcAutoRefreshTimer = null;
     }
 });
 
@@ -2301,6 +2452,10 @@ window.logout = async function () {
 };
 
 init();
+
+
+
+
 
 
 
