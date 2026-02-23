@@ -18,9 +18,10 @@
             { id: '3394', grupo: 'NUTIBARA', nombre: 'Nutibara-Aeropuerto-Variante Palmas' },
             { id: '3384', grupo: 'SANDIEGO', nombre: 'San Diego-Aeropuerto-Tunel' },
             { id: '3395', grupo: 'SANDIEGO', nombre: 'San Diego-Aeropuerto-Variante Palmas' },
-            { id: '4413', grupo: 'SANDIEGO', nombre: 'Aeropuerto-Exposiciones' }
+            { id: '4413', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-Exposiciones' }
         ],
         DISPATCH_PAGE_SIZE: 35,
         MANAGER_SHIFT_PAGE_SIZE: 10
     };
 })();
+
