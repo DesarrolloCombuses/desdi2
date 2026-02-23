@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login</title>
+<title>COMBUSES | Acceso</title>
 
 <link rel="stylesheet" href="styles.css">
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -11,32 +11,20 @@
 
 <body>
 
-<div class="container">
-  <div class="auth-container">
-
-    <div class="auth-tabs">
-      <button id="tabLogin" class="tab-btn active">Iniciar Sesión</button>
-      <button id="tabRegister" class="tab-btn">Registrarse</button>
+<div class="login-shell">
+  <div class="login-card">
+    <div class="brand">
+      <h1>COMBUSES</h1>
+      <p>Plataforma interna de despachos</p>
     </div>
 
     <form id="loginForm" class="auth-form active">
-      <h2>Iniciar Sesión</h2>
-      <input type="email" id="loginEmail" placeholder="Email" required>
-      <input type="password" id="loginPassword" placeholder="Contraseña" required>
-      <button type="submit" class="btn-primary">Entrar</button>
+      <h2>Iniciar sesión</h2>
+      <input type="email" id="loginEmail" placeholder="Correo corporativo" required autocomplete="username">
+      <input type="password" id="loginPassword" placeholder="Contrase�a" required autocomplete="current-password">
+      <button type="submit" class="btn-primary">Entrar al sistema</button>
       <div id="loginMessage" class="message"></div>
     </form>
-
-    <form id="registerForm" class="auth-form">
-      <h2>Registrarse</h2>
-      <input type="email" id="regEmail" placeholder="Email" required>
-      <input type="password" id="regPassword" placeholder="Contraseña (mín 6)" required minlength="6">
-      <input type="text" id="regUsername" placeholder="Usuario" required>
-      <input type="text" id="regFullName" placeholder="Nombre completo" required>
-      <button type="submit" class="btn-primary">Crear Cuenta</button>
-      <div id="registerMessage" class="message"></div>
-    </form>
-
   </div>
 </div>
 
