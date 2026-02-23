@@ -38,7 +38,13 @@ if (!SUPABASE_URL || !SUPABASE_KEY || typeof formatDate !== 'function') {
 const { createClient } = window.supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const sbExternal = (EXT_SUPABASE_URL && EXT_SUPABASE_ANON_KEY)
-    ? createClient(EXT_SUPABASE_URL, EXT_SUPABASE_ANON_KEY)
+    ? createClient(EXT_SUPABASE_URL, EXT_SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+        }
+    })
     : null;
 const LOGIN_LOCK_TABLE = 'user_login_locks';
 const LOCK_TOKEN_KEY = 'combuses_lock_token';
@@ -2295,14 +2301,6 @@ window.logout = async function () {
 };
 
 init();
-
-
-
-
-
-
-
-
 
 
 
