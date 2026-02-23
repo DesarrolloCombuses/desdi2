@@ -8,6 +8,7 @@ const {
     EXT_SUPABASE_URL,
     EXT_SUPABASE_ANON_KEY,
     EXT_VEHICULO_CONDUCTORES_TABLE,
+    APPS_SCRIPT_URL,
     ITINERARIES,
     DISPATCH_PAGE_SIZE,
     MANAGER_SHIFT_PAGE_SIZE
@@ -39,6 +40,9 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const sbExternal = (EXT_SUPABASE_URL && EXT_SUPABASE_ANON_KEY)
     ? createClient(EXT_SUPABASE_URL, EXT_SUPABASE_ANON_KEY)
     : null;
+const LOGIN_LOCK_TABLE = 'user_login_locks';
+const LOCK_TOKEN_KEY = 'combuses_lock_token';
+const LOCK_HEARTBEAT_MS = 60 * 1000;
 
 let currentUser = null;
 let driversCatalog = [];
@@ -157,6 +161,9 @@ let qrDetector = null;
 let qrCanvas = null;
 let qrCanvasCtx = null;
 let vehicleDriverLookupSeq = 0;
+let dispatchSubmitInFlight = false;
+let managerShiftActionInFlight = false;
+let loginLockHeartbeatTimer = null;
 
 if (
     !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !routeInput || !routeSelectedMeta ||
@@ -587,7 +594,7 @@ function setDispatchAvailability() {
         ? 'No tienes internet. Debes reconectarte para generar y consultar despachos.'
         : 'Debes iniciar turno en la pestaña Control gestor para habilitar esta seccion.';
     manager.value = enabled ? (managerProfile.full_name || '') : '';
-    submitDispatchBtn.disabled = !enabled;
+    submitDispatchBtn.disabled = !enabled || dispatchSubmitInFlight;
 
     if (!hasProfile) {
         managerStatus.textContent = 'No se pudo cargar tu identidad de usuario.';
@@ -616,6 +623,13 @@ function setDispatchAvailability() {
     const start = formatDateTime(activeShift.start_time);
     managerStatus.textContent = `Turno activo desde ${start}. Recuerda finalizar turno al terminar.`;
     lastManagerAlertKey = '';
+}
+
+function setDispatchSubmitLoading(isLoading) {
+    if (!submitDispatchBtn.dataset.defaultText) {
+        submitDispatchBtn.dataset.defaultText = submitDispatchBtn.textContent.trim() || 'Realizar Despacho';
+    }
+    submitDispatchBtn.textContent = isLoading ? 'Procesando...' : submitDispatchBtn.dataset.defaultText;
 }
 
 function renderNetworkBadge() {
@@ -695,6 +709,53 @@ function generateSessionToken() {
         return window.crypto.randomUUID();
     }
     return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function getLoginLockToken() {
+    try {
+        return localStorage.getItem(LOCK_TOKEN_KEY) || '';
+    } catch (err) {
+        return '';
+    }
+}
+
+async function refreshLoginLock() {
+    const token = getLoginLockToken();
+    if (!currentUser?.id || !token) return;
+
+    await sb
+        .from(LOGIN_LOCK_TABLE)
+        .update({
+            active: true,
+            last_seen_at: new Date().toISOString()
+        })
+        .eq('user_id', currentUser.id)
+        .eq('session_token', token);
+}
+
+function startLoginLockHeartbeat() {
+    if (loginLockHeartbeatTimer) {
+        clearInterval(loginLockHeartbeatTimer);
+        loginLockHeartbeatTimer = null;
+    }
+
+    loginLockHeartbeatTimer = setInterval(() => {
+        refreshLoginLock().catch(() => {});
+    }, LOCK_HEARTBEAT_MS);
+}
+
+async function releaseLoginLock() {
+    const token = getLoginLockToken();
+    if (!currentUser?.id || !token) return;
+
+    await sb
+        .from(LOGIN_LOCK_TABLE)
+        .update({
+            active: false,
+            last_seen_at: new Date().toISOString()
+        })
+        .eq('user_id', currentUser.id)
+        .eq('session_token', token);
 }
 
 function clearShiftMaps() {
@@ -861,6 +922,11 @@ function renderManagerShiftHistoryPage() {
 }
 
 async function startManagerShift() {
+    if (managerShiftActionInFlight) return;
+    managerShiftActionInFlight = true;
+    startShiftBtn.disabled = true;
+    endShiftBtn.disabled = true;
+    try {
     if (!managerProfile) {
         alert('No se pudo identificar el gestor logueado.');
         return;
@@ -920,9 +986,19 @@ async function startManagerShift() {
     setDispatchAvailability();
     showManagerAlertOnce('shift_started', 'Turno iniciado correctamente.');
     await loadManagerShiftHistory();
+    } finally {
+        managerShiftActionInFlight = false;
+        startShiftBtn.disabled = false;
+        endShiftBtn.disabled = false;
+    }
 }
 
 async function endManagerShift() {
+    if (managerShiftActionInFlight) return;
+    managerShiftActionInFlight = true;
+    startShiftBtn.disabled = true;
+    endShiftBtn.disabled = true;
+    try {
     if (!activeShift) {
         alert('No tienes un turno activo para finalizar.');
         return;
@@ -951,6 +1027,11 @@ async function endManagerShift() {
     setDispatchAvailability();
     showManagerAlertOnce('shift_ended', 'Turno finalizado correctamente.');
     await loadManagerShiftHistory();
+    } finally {
+        managerShiftActionInFlight = false;
+        startShiftBtn.disabled = false;
+        endShiftBtn.disabled = false;
+    }
 }
 
 function validateDispatchForm() {
@@ -1222,6 +1303,44 @@ function renderRouteSelectedMeta() {
 
 function getSelectedItineraryRecord() {
     return ITINERARIES.find((item) => String(item.nombre || '').trim() === String(routeInput.value || '').trim()) || null;
+}
+
+async function sendDispatchToAppsScript(payload) {
+    const url = String(APPS_SCRIPT_URL || '').trim();
+    if (!url) return { skipped: true, reason: 'missing_url' };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+
+        const text = await response.text();
+        let parsed = null;
+        try {
+            parsed = JSON.parse(text);
+        } catch (err) {
+            parsed = null;
+        }
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${text.slice(0, 250)}`);
+        }
+
+        return parsed || { success: true, message: 'Respuesta recibida' };
+    } catch (err) {
+        if (String(err?.message || '').toLowerCase().includes('failed to fetch')) {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            return { success: true, message: 'Enviado sin confirmacion (no-cors)' };
+        }
+        throw err;
+    }
 }
 
 function getSelectedVehicleNumber() {
@@ -1636,6 +1755,8 @@ async function init() {
     currentUser = user;
     userEmail.textContent = user.email;
     renderNetworkBadge();
+    await refreshLoginLock();
+    startLoginLockHeartbeat();
 
     setAutomaticDate();
     setSessionView('dispatch');
@@ -1971,11 +2092,22 @@ refreshSicovCsvBtn.addEventListener('click', () => refreshCsv('sicov'));
 refreshExternalVcBtn.addEventListener('click', () => refreshCsv('external-vc'));
 window.addEventListener('offline', () => updateNetworkStatus(true));
 window.addEventListener('online', () => updateNetworkStatus(true));
-window.addEventListener('beforeunload', () => { stopQrScanner(); });
+window.addEventListener('beforeunload', () => {
+    stopQrScanner();
+    if (loginLockHeartbeatTimer) {
+        clearInterval(loginLockHeartbeatTimer);
+        loginLockHeartbeatTimer = null;
+    }
+});
 
 dispatchForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (dispatchSubmitInFlight) return;
+    dispatchSubmitInFlight = true;
+    setDispatchSubmitLoading(true);
+    setDispatchAvailability();
 
+    try {
     if (navigator.onLine === false || !hasInternet) {
         hasInternet = false;
         renderNetworkBadge();
@@ -2002,6 +2134,9 @@ dispatchForm.addEventListener('submit', async (e) => {
         return;
     }
     const departureHour = `${departureTime.value}:00`;
+    const selectedVehicle = getSelectedVehicleRecord();
+    const selectedDriver = getSelectedDriverRecord();
+    const selectedItinerary = getSelectedItineraryRecord();
 
     const payload = {
         user_id: currentUser.id,
@@ -2021,6 +2156,12 @@ dispatchForm.addEventListener('submit', async (e) => {
         alert('Completa los campos obligatorios del formulario.');
         return;
     }
+
+    const appsScriptPayload = {
+        mId: String(selectedVehicle?.id || '').trim(),
+        itinerary: String(selectedItinerary?.id || '').trim(),
+        drvId: String(selectedDriver?.dr_id || '').trim()
+    };
 
     const confirmMessage = `Confirma el despacho:\nVehiculo: ${payload.vehicle}\nConductor: ${payload.driver}\nRuta: ${payload.route}\nFecha/Hora: ${departureDate.value} ${departureTime.value}`;
     const confirmDispatch = await openDispatchConfirmModal(confirmMessage, 'Confirmar despacho');
@@ -2043,7 +2184,23 @@ dispatchForm.addEventListener('submit', async (e) => {
         alert(error.message);
         return;
     }
-    alert('Despacho registrado exitosamente.');
+
+    if (!appsScriptPayload.mId || !appsScriptPayload.itinerary || !appsScriptPayload.drvId) {
+        alert('Despacho registrado. No se envio al servicio externo porque faltan IDs.');
+    } else {
+        try {
+            const bridgeResult = await sendDispatchToAppsScript(appsScriptPayload);
+            if (bridgeResult?.skipped) {
+                alert('Despacho registrado. El enlace de envio no esta configurado.');
+            } else if (bridgeResult?.success === false) {
+                alert(`Despacho registrado. El servicio externo reporto error: ${bridgeResult.message || 'sin detalle'}`);
+            } else {
+                alert('Despacho registrado y envio externo realizado.');
+            }
+        } catch (bridgeErr) {
+            alert(`Despacho registrado, pero el envio externo fallo: ${bridgeErr.message}`);
+        }
+    }
 
     dispatchForm.reset();
     setAutomaticDate();
@@ -2056,6 +2213,11 @@ dispatchForm.addEventListener('submit', async (e) => {
     vehicleInfo.textContent = `${vehiclesCatalog.length} vehiculos disponibles.`;
     vehicle.focus();
     await loadDispatches();
+    } finally {
+        dispatchSubmitInFlight = false;
+        setDispatchSubmitLoading(false);
+        setDispatchAvailability();
+    }
 });
 
 window.editPassengers = async function (id, currentPassengers) {
@@ -2122,11 +2284,21 @@ window.logout = async function () {
         return;
     }
 
+    try {
+        await releaseLoginLock();
+    } catch (err) {
+        // Si falla el release igual cerramos sesion local.
+    }
+
     await sb.auth.signOut();
     location.href = 'index.html';
 };
 
 init();
+
+
+
+
 
 
 
