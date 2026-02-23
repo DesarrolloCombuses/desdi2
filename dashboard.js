@@ -43,7 +43,6 @@ const sbExternal = (EXT_SUPABASE_URL && EXT_SUPABASE_ANON_KEY)
 let currentUser = null;
 let driversCatalog = [];
 let vehiclesCatalog = [];
-let currentStep = 1;
 let dispatchesCache = [];
 let lastNoDataAlertKey = '';
 let dispatchPage = 1;
@@ -71,17 +70,17 @@ const userEmail = document.getElementById('userEmail');
 const dispatchForm = document.getElementById('dispatchForm');
 const vehicle = document.getElementById('vehicle');
 const vehicleInfo = document.getElementById('vehicleInfo');
+const vehicleSelectedMeta = document.getElementById('vehicleSelectedMeta');
 const vehicleDocsPanel = document.getElementById('vehicleDocsPanel');
 const departureDate = document.getElementById('departureDate');
 const departureTime = document.getElementById('departureTime');
 const routeInput = document.getElementById('route');
+const routeSelectedMeta = document.getElementById('routeSelectedMeta');
 const driver = document.getElementById('driver');
-const passengerCount = document.getElementById('passengerCount');
+const driverSelectedMeta = document.getElementById('driverSelectedMeta');
 const manager = document.getElementById('manager');
-const managerCedula = document.getElementById('managerCedula');
-const managerFullName = document.getElementById('managerFullName');
+const managerIdentity = document.getElementById('managerIdentity');
 const managerItineraryGroup = document.getElementById('managerItineraryGroup');
-const saveManagerBtn = document.getElementById('saveManagerBtn');
 const startShiftBtn = document.getElementById('startShiftBtn');
 const endShiftBtn = document.getElementById('endShiftBtn');
 const managerStatus = document.getElementById('managerStatus');
@@ -103,6 +102,7 @@ const missingItineraryFilter = document.getElementById('missingItineraryFilter')
 const salidasList = document.getElementById('salidasList');
 const itineraryFilter = document.getElementById('itineraryFilter');
 const dispatchDateFilter = document.getElementById('dispatchDateFilter');
+const dispatchManagerFilter = document.getElementById('dispatchManagerFilter');
 const dispatchItineraryFilter = document.getElementById('dispatchItineraryFilter');
 const sessionManagerBtn = document.getElementById('sessionManagerBtn');
 const sessionDispatchBtn = document.getElementById('sessionDispatchBtn');
@@ -135,11 +135,7 @@ const refreshFleetCsvBtn = document.getElementById('refreshFleetCsvBtn');
 const refreshSicovCsvBtn = document.getElementById('refreshSicovCsvBtn');
 const refreshExternalVcBtn = document.getElementById('refreshExternalVcBtn');
 const dispatchLockedNotice = document.getElementById('dispatchLockedNotice');
-const prevStepBtn = document.getElementById('prevStepBtn');
-const nextStepBtn = document.getElementById('nextStepBtn');
 const submitDispatchBtn = document.getElementById('submitDispatchBtn');
-const stepIndicator = document.getElementById('stepIndicator');
-const formSteps = Array.from(document.querySelectorAll('.form-step'));
 const dispatchConfirmModal = document.getElementById('dispatchConfirmModal');
 const dispatchConfirmText = document.getElementById('dispatchConfirmText');
 const dispatchConfirmCancel = document.getElementById('dispatchConfirmCancel');
@@ -163,15 +159,14 @@ let qrCanvasCtx = null;
 let vehicleDriverLookupSeq = 0;
 
 if (
-    !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !vehicleDocsPanel || !departureDate || !departureTime || !routeInput ||
-    !driver || !passengerCount || !manager || !managerCedula || !managerFullName || !managerItineraryGroup || !saveManagerBtn || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
+    !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !routeInput || !routeSelectedMeta ||
+    !driver || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
     !dispatchFormCard || !dispatchListCard || !dispatchLockedNotice ||
     !notes || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !itineraryFilter ||
-    !dispatchDateFilter || !dispatchItineraryFilter ||
+    !dispatchDateFilter || !dispatchManagerFilter || !dispatchItineraryFilter ||
     !sessionManagerBtn || !sessionDispatchBtn || !sessionSalidasBtn || !sessionMissingBtn || !sessionFleetBtn || !sessionSicovBtn || !sessionExternalVcBtn || !sessionUpdatesBtn || !managerSession || !dispatchSession || !salidasSession || !missingSession || !fleetSession || !sicovSession || !externalVcSession || !updatesSession || !fleetStatus || !fleetList || !sicovStatus || !sicovList || !sicovFilter || !externalVcStatus || !externalVcList || !externalVcFilter ||
     !refreshAllCsvBtn || !refreshVehiclesCsvBtn || !refreshDriversCsvBtn || !refreshFleetCsvBtn || !refreshSicovCsvBtn || !refreshExternalVcBtn ||
-    !dispatchConfirmModal || !dispatchConfirmText || !dispatchConfirmCancel || !dispatchConfirmOk || !scanVehicleQrBtn || !qrScannerModal || !qrScannerVideo || !qrScannerStatus || !qrScannerClose ||
-    !prevStepBtn || !nextStepBtn || !submitDispatchBtn || !stepIndicator || formSteps.length !== 2 ||
+    !dispatchConfirmModal || !dispatchConfirmText || !dispatchConfirmCancel || !dispatchConfirmOk || !scanVehicleQrBtn || !qrScannerModal || !qrScannerVideo || !qrScannerStatus || !qrScannerClose || !submitDispatchBtn ||
     !networkStatus || !dispatchLockedText
 ) {
     throw new Error('Faltan elementos en el HTML del dashboard.');
@@ -214,14 +209,31 @@ function renderVehicleDocsStatus() {
     }
 }
 
+function buildNoCacheUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return raw;
+    try {
+        const u = new URL(raw, window.location.href);
+        u.searchParams.set('_cb', String(Date.now()));
+        return u.toString();
+    } catch (err) {
+        const sep = raw.includes('?') ? '&' : '?';
+        return `${raw}${sep}_cb=${Date.now()}`;
+    }
+}
+
 
 function setAutomaticDate() {
     const { year, month, day } = getTodayParts();
     departureDate.value = `${day}/${month}/${year}`;
 }
 
-function getDepartureIsoFromTodayAndTime(timeValue) {
-    const { year, month, day } = getTodayParts();
+function getDepartureIsoFromDateAndTime(dateValue, timeValue) {
+    const match = String(dateValue || '').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return '';
+    const day = match[1];
+    const month = match[2];
+    const year = match[3];
     // Guardamos la hora seleccionada como hora de Colombia (-05:00) para evitar desfases.
     return `${year}-${month}-${day}T${timeValue}:00-05:00`;
 }
@@ -401,9 +413,10 @@ async function startQrScanner() {
 }
 
 
-function openDispatchConfirmModal(message) {
+function openDispatchConfirmModal(message, okLabel = 'Despachar de todos modos') {
     return new Promise((resolve) => {
         dispatchConfirmText.textContent = message;
+        dispatchConfirmOk.textContent = okLabel;
         dispatchConfirmModal.style.display = 'flex';
 
         const onCancel = () => cleanup(false);
@@ -417,6 +430,7 @@ function openDispatchConfirmModal(message) {
             dispatchConfirmCancel.removeEventListener('click', onCancel);
             dispatchConfirmOk.removeEventListener('click', onOk);
             dispatchConfirmModal.removeEventListener('click', onBackdrop);
+            dispatchConfirmOk.textContent = 'Despachar de todos modos';
             resolve(value);
         }
 
@@ -530,19 +544,6 @@ async function insertDispatchWithCreatedAtFallback(basePayload) {
     return result;
 }
 
-function showStep(step) {
-    currentStep = Math.min(2, Math.max(1, step));
-
-    formSteps.forEach((section) => {
-        section.classList.toggle('active', Number(section.dataset.step) === currentStep);
-    });
-
-    stepIndicator.textContent = `Paso ${currentStep} de 2`;
-    prevStepBtn.disabled = currentStep === 1;
-    nextStepBtn.style.display = currentStep === 1 ? 'inline-block' : 'none';
-    submitDispatchBtn.style.display = currentStep === 2 ? 'inline-block' : 'none';
-}
-
 function setSessionView(view) {
     const isManager = view === 'manager';
     const isDispatch = view === 'dispatch';
@@ -586,24 +587,23 @@ function setDispatchAvailability() {
         ? 'No tienes internet. Debes reconectarte para generar y consultar despachos.'
         : 'Debes iniciar turno en la pestaña Control gestor para habilitar esta seccion.';
     manager.value = enabled ? (managerProfile.full_name || '') : '';
-    nextStepBtn.disabled = !enabled;
     submitDispatchBtn.disabled = !enabled;
 
     if (!hasProfile) {
-        managerStatus.textContent = 'Debes registrar cédula y nombre completo para operar.';
-        showManagerAlertOnce('need_register', 'No existe gestor validado. Debes registrarte con cedula y nombre completo.');
+        managerStatus.textContent = 'No se pudo cargar tu identidad de usuario.';
+        showManagerAlertOnce('need_identity', 'No se pudo identificar el gestor logueado. Vuelve a iniciar sesion.');
         return;
     }
 
     if (!managerAuthenticated) {
-        managerStatus.textContent = 'Valida tus datos de gestor (cedula y nombre) para habilitar operaciones.';
-        showManagerAlertOnce('need_validate', 'Debes validar tu cedula y nombre para continuar.');
+        managerStatus.textContent = 'Debes iniciar sesion para habilitar operaciones.';
+        showManagerAlertOnce('need_validate', 'Debes iniciar sesion para continuar.');
         return;
     }
 
     if (shiftSessionMismatch) {
-        managerStatus.textContent = 'Turno activo detectado en otra sesion. Debes validar de nuevo con tu cedula.';
-        showManagerAlertOnce('shift_session_mismatch', 'Este turno activo pertenece a otra sesion. Valida tus datos para continuar.');
+        managerStatus.textContent = 'Turno activo detectado en otra sesion. Cierra sesion y vuelve a entrar para recuperar control.';
+        showManagerAlertOnce('shift_session_mismatch', 'Este turno activo pertenece a otra sesion. Cierra sesion y vuelve a ingresar.');
         return;
     }
 
@@ -644,11 +644,6 @@ function showManagerAlertOnce(key, message) {
     if (lastManagerAlertKey === key) return;
     lastManagerAlertKey = key;
     alert(message);
-}
-
-function setManagerNameLocked(locked) {
-    managerFullName.readOnly = locked;
-    managerFullName.style.background = locked ? '#f3f4f6' : '';
 }
 
 function formatCoord(value) {
@@ -761,97 +756,18 @@ async function getCurrentPositionSafe() {
     });
 }
 
-async function loadManagerProfile() {
-    managerProfile = null;
-    managerAuthenticated = false;
+function resolveLoggedManagerProfile() {
+    const metadata = currentUser?.user_metadata || {};
+    const fullName = String(
+        metadata.display_name || metadata.full_name || metadata.name || currentUser?.email || 'Gestor'
+    ).trim();
 
-    managerCedula.value = '';
-    managerFullName.value = '';
-    setManagerNameLocked(false);
-
-    const { data, error } = await sb
-        .from('manager_profiles')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .order('updated_at', { ascending: false })
-        .limit(200);
-
-    if (error) throw error;
-
-    const profiles = data || [];
-    if (profiles.length === 0) return;
-
-    let selected = null;
-    if (activeShift?.manager_profile_id) {
-        selected = profiles.find((row) => String(row.id) === String(activeShift.manager_profile_id)) || null;
-    }
-
-    if (!selected && activeShift?.manager_name) {
-        selected = profiles.find((row) => normalizeText(row.full_name) === normalizeText(activeShift.manager_name)) || null;
-    }
-
-    if (!selected) selected = profiles[0];
-
-    managerProfile = selected;
-    managerCedula.value = selected.cedula || '';
-    managerFullName.value = selected.full_name || '';
-    setManagerNameLocked(true);
-}
-
-async function findManagerByCedula(cedula) {
-    const { data, error } = await sb
-        .from('manager_profiles')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .eq('cedula', cedula)
-        .limit(1)
-        .maybeSingle();
-
-    if (error) throw error;
-    return data || null;
-}
-
-async function resolveManagerByCedulaInput() {
-    const cedula = managerCedula.value.trim();
-    if (!cedula) {
-        managerAuthenticated = false;
-        managerProfile = null;
-        managerFullName.value = '';
-        setManagerNameLocked(false);
-        showManagerAlertOnce('empty_cedula', 'Debes ingresar la cedula del gestor.');
-        setDispatchAvailability();
-        return null;
-    }
-
-    const found = await findManagerByCedula(cedula);
-    if (!found) {
-        managerAuthenticated = false;
-        managerProfile = null;
-        managerFullName.value = '';
-        setManagerNameLocked(false);
-        managerStatus.textContent = 'Cedula no registrada. Debes registrar nombre completo.';
-        showManagerAlertOnce('cedula_not_found', 'Cedula no registrada. Debes registrarte con nombre completo.');
-        setDispatchAvailability();
-        return null;
-    }
-
-    if (activeShift?.manager_profile_id && String(found.id) !== String(activeShift.manager_profile_id)) {
-        managerAuthenticated = false;
-        managerStatus.textContent = 'Existe un turno activo de otro gestor en esta sesion.';
-        showManagerAlertOnce('active_shift_other_manager', 'El turno activo pertenece a otro gestor. Debes finalizar ese turno o usar la cedula correcta.');
-        setDispatchAvailability();
-        return null;
-    }
-
-    managerProfile = found;
-    managerFullName.value = found.full_name || '';
-    setManagerNameLocked(true);
+    managerProfile = {
+        user_id: currentUser?.id || '',
+        full_name: fullName
+    };
     managerAuthenticated = true;
-    shiftSessionMismatch = false;
-    if (activeShift?.session_token) setStoredShiftToken(String(activeShift.session_token));
-    showManagerAlertOnce('cedula_found', `Cedula validada. Bienvenido ${found.full_name || ''}`.trim());
-    setDispatchAvailability();
-    return found;
+    managerIdentity.textContent = `Gestor: ${fullName}`;
 }
 
 async function loadActiveShift() {
@@ -944,79 +860,14 @@ function renderManagerShiftHistoryPage() {
     renderShiftMaps(pageRows, start);
 }
 
-async function saveManagerProfile() {
-    const cedula = managerCedula.value.trim();
-    const fullName = managerFullName.value.trim();
-
-    if (!cedula) {
-        alert('Debes ingresar cedula.');
-        return;
-    }
-
-    const byCedula = await findManagerByCedula(cedula);
-    if (byCedula) {
-        if (activeShift?.manager_profile_id && String(byCedula.id) !== String(activeShift.manager_profile_id)) {
-            alert('El turno activo pertenece a otro gestor. Debes finalizar ese turno o validar la cedula correcta.');
-            return;
-        }
-        managerProfile = byCedula;
-        managerFullName.value = byCedula.full_name || '';
-        setManagerNameLocked(true);
-        managerAuthenticated = true;
-        shiftSessionMismatch = false;
-        if (activeShift?.session_token) setStoredShiftToken(String(activeShift.session_token));
-        showManagerAlertOnce('login_ok', 'Gestor validado correctamente.');
-        setDispatchAvailability();
-        await loadManagerShiftHistory();
-        return;
-    }
-
-    if (!fullName) {
-        alert('Cedula no registrada. Debes ingresar nombre completo para registrarte.');
-        return;
-    }
-
-    // Siempre registramos una nueva persona para este usuario cuando la cédula no existe.
-    const { error } = await sb
-        .from('manager_profiles')
-        .insert([
-            {
-                user_id: currentUser.id,
-                cedula,
-                full_name: fullName,
-                updated_at: new Date().toISOString()
-            }
-        ]);
-
-    if (error) {
-        alert(error.message);
-        return;
-    }
-
-    const created = await findManagerByCedula(cedula);
-    managerProfile = created;
-    managerAuthenticated = !!created;
-    shiftSessionMismatch = false;
-    setManagerNameLocked(!!created);
-    showManagerAlertOnce('registered_ok', 'Gestor registrado correctamente. Ahora puedes iniciar turno.');
-
-    setDispatchAvailability();
-    await loadManagerShiftHistory();
-}
-
 async function startManagerShift() {
     if (!managerProfile) {
-        alert('Primero guarda los datos del gestor.');
+        alert('No se pudo identificar el gestor logueado.');
         return;
     }
 
     if (!managerAuthenticated) {
-        alert('Debes validar tu cedula y nombre antes de iniciar turno.');
-        return;
-    }
-
-    if (!managerProfile.id) {
-        alert('No se pudo identificar el gestor (falta id de perfil). Guarda/valida nuevamente la cédula.');
+        alert('Debes iniciar sesion para iniciar turno.');
         return;
     }
 
@@ -1030,7 +881,6 @@ async function startManagerShift() {
     let { error } = await sb.from('manager_shifts').insert([
         {
             user_id: currentUser.id,
-            manager_profile_id: managerProfile.id,
             manager_name: managerProfile.full_name,
             session_token: sessionToken,
             start_time: new Date().toISOString(),
@@ -1041,7 +891,7 @@ async function startManagerShift() {
 
     if (error) {
         const msg = String(error.message || '').toLowerCase();
-        const missingSecureColumns = (msg.includes('manager_profile_id') || msg.includes('session_token')) &&
+        const missingSecureColumns = (msg.includes('session_token') || msg.includes('manager_profile_id')) &&
             (msg.includes('column') || msg.includes('schema cache'));
         if (missingSecureColumns) {
             const fallback = await sb.from('manager_shifts').insert([
@@ -1055,7 +905,7 @@ async function startManagerShift() {
             ]);
             error = fallback.error || null;
             if (!error) {
-                alert('Turno iniciado en modo compatible. Falta aplicar migracion de seguridad (manager_profile_id/session_token).');
+                alert('Turno iniciado en modo compatible.');
             }
         }
     }
@@ -1095,21 +945,20 @@ async function endManagerShift() {
     }
 
     await loadActiveShift();
-    managerAuthenticated = false;
     shiftSessionMismatch = false;
     clearStoredShiftToken();
-    managerCedula.value = '';
-    managerFullName.value = '';
-    setManagerNameLocked(false);
+    managerAuthenticated = true;
     setDispatchAvailability();
-    showManagerAlertOnce('shift_ended', 'Turno finalizado. Debes registrarte/validarte de nuevo para continuar.');
+    showManagerAlertOnce('shift_ended', 'Turno finalizado correctamente.');
     await loadManagerShiftHistory();
 }
 
-function validateStep1() {
+function validateDispatchForm() {
     if (!vehicle.value) return 'Selecciona un vehiculo.';
     if (!driver.value) return 'Selecciona un conductor.';
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(String(departureDate.value || '').trim())) return 'Ingresa la fecha en formato DD/MM/YYYY.';
     if (!departureTime.value) return 'Selecciona la hora de salida.';
+    if (!routeInput.value.trim()) return 'Selecciona un itinerario.';
     return '';
 }
 
@@ -1127,6 +976,8 @@ function loadItineraries() {
         option.textContent = label;
         routeInput.appendChild(option);
     });
+
+    renderRouteSelectedMeta();
 }
 
 function loadItineraryGroups() {
@@ -1161,6 +1012,21 @@ function loadVehicles(catalog) {
         option.textContent = label;
         vehicle.appendChild(option);
     });
+
+    renderVehicleSelectedMeta();
+}
+
+function renderVehicleSelectedMeta() {
+    const selected = getSelectedVehicleRecord();
+    if (!selected) {
+        vehicleSelectedMeta.textContent = 'ID vehiculo: -';
+        return;
+    }
+    vehicleSelectedMeta.textContent = `ID vehiculo: ${selected.id || '-'} | Placa: ${selected.placa || '-'} | Interno: ${selected.descripcion || '-'}`;
+}
+
+function getSelectedVehicleRecord() {
+    return vehiclesCatalog.find((item) => String(item.descripcion || item.placa || '').trim() === String(vehicle.value || '').trim()) || null;
 }
 
 function getDispatchSortTime(dispatch) {
@@ -1187,6 +1053,45 @@ function getDispatchSortTimestamp(dispatch) {
 
     const fallback = new Date(dispatch.departure_time || dispatch.created_at || 0).getTime();
     return Number.isNaN(fallback) ? 0 : fallback;
+}
+
+function matchesDispatchDate(dispatch, selectedDate) {
+    const selected = String(selectedDate || '').trim();
+    if (!selected) return true;
+
+    const rawDeparture = String(dispatch.departure_time || '').trim();
+    const rawDepartureIso = rawDeparture.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || '';
+    let rawDepartureBogota = '';
+    if (rawDeparture) {
+        const date = new Date(rawDeparture);
+        if (!Number.isNaN(date.getTime())) {
+            const parts = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'America/Bogota',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).formatToParts(date);
+            const y = parts.find((p) => p.type === 'year')?.value || '';
+            const m = parts.find((p) => p.type === 'month')?.value || '';
+            const d = parts.find((p) => p.type === 'day')?.value || '';
+            rawDepartureBogota = `${y}-${m}-${d}`;
+        }
+    }
+
+    const candidates = new Set([
+        rawDepartureIso,
+        rawDepartureBogota,
+        getStoredDateKey({ departure_time: rawDeparture }),
+        getDispatchDateKey({ departure_time: rawDeparture })
+    ].filter(Boolean));
+
+    return candidates.has(selected);
+}
+
+function canCurrentManagerEditDispatch(dispatch) {
+    const currentManager = normalizeText(managerProfile?.full_name || '');
+    const dispatchManager = normalizeText(dispatch?.manager || '');
+    return !!currentManager && !!dispatchManager && currentManager === dispatchManager;
 }
 
 
@@ -1241,9 +1146,14 @@ function renderMissingItineraryFilter(data) {
 function loadDrivers(catalog) {
     driver.innerHTML = '<option value="">Selecciona conductor</option>';
 
+    const enabledCatalog = catalog.filter((item) => {
+        const statusText = normalizeText(item.status);
+        return statusText !== 'disabled' && statusText !== 'inactivo' && statusText !== 'desvinculado';
+    });
+
     const activeFirst = [
-        ...catalog.filter((item) => isActiveDriverStatus(item.status)),
-        ...catalog.filter((item) => !isActiveDriverStatus(item.status))
+        ...enabledCatalog.filter((item) => isActiveDriverStatus(item.status)),
+        ...enabledCatalog.filter((item) => !isActiveDriverStatus(item.status))
     ];
 
     activeFirst.forEach((item) => {
@@ -1253,6 +1163,21 @@ function loadDrivers(catalog) {
         option.textContent = label;
         driver.appendChild(option);
     });
+
+    renderDriverSelectedMeta();
+}
+
+function renderDriverSelectedMeta() {
+    const selected = getSelectedDriverRecord();
+    if (!selected) {
+        driverSelectedMeta.textContent = 'ID conductor: -';
+        return;
+    }
+    driverSelectedMeta.textContent = `ID conductor: ${selected.dr_id || '-'} | Cedula: ${selected.cedula || '-'} | Nombre: ${selected.nombre || '-'}`;
+}
+
+function getSelectedDriverRecord() {
+    return driversCatalog.find((item) => normalizeText(item.nombre) === normalizeText(driver.value)) || null;
 }
 
 function renderDriverInfo() {
@@ -1260,10 +1185,12 @@ function renderDriverInfo() {
 
     if (!selected) {
         driverInfo.textContent = 'Selecciona un conductor de la lista.';
+        renderDriverSelectedMeta();
         return;
     }
 
     driverInfo.textContent = `Cedula: ${selected.cedula || '-'} | Fleet: ${selected.fleet || '-'} | Celular: ${selected.celular || '-'} | Email: ${selected.email || '-'} | Status: ${selected.status || '-'}`;
+    renderDriverSelectedMeta();
 
     if (selected.fleet) {
         const fleetValue = normalizeText(selected.fleet);
@@ -1279,8 +1206,22 @@ function handleVehicleChange() {
     if (!qrSelectionInProgress) {
         dispatchEntryMethod = 'manual';
     }
+    renderVehicleSelectedMeta();
     renderVehicleDocsStatus();
     autoFillDriverFromExternalByVehicle();
+}
+
+function renderRouteSelectedMeta() {
+    const selected = getSelectedItineraryRecord();
+    if (!selected) {
+        routeSelectedMeta.textContent = 'ID itinerario: -';
+        return;
+    }
+    routeSelectedMeta.textContent = `ID itinerario: ${selected.id || '-'} | Grupo: ${selected.grupo || '-'} | Ruta: ${selected.nombre || '-'}`;
+}
+
+function getSelectedItineraryRecord() {
+    return ITINERARIES.find((item) => String(item.nombre || '').trim() === String(routeInput.value || '').trim()) || null;
 }
 
 function getSelectedVehicleNumber() {
@@ -1364,7 +1305,7 @@ async function autoFillDriverFromExternalByVehicle() {
 
 async function loadVehiclesFromSheet() {
     try {
-        const response = await fetch(VEHICLES_CSV_URL, { cache: 'no-store' });
+        const response = await fetch(buildNoCacheUrl(VEHICLES_CSV_URL), { cache: 'no-store' });
         if (!response.ok) throw new Error('No se pudo obtener vehiculos.');
 
         const csvText = await response.text();
@@ -1389,6 +1330,9 @@ async function loadVehiclesFromSheet() {
             .filter((item) => item.placa || item.id || item.descripcion);
 
         loadVehicles(vehiclesCatalog);
+        vehicle.value = '';
+        renderVehicleSelectedMeta();
+        renderVehicleDocsStatus();
         vehicleInfo.textContent = `${vehiclesCatalog.length} vehiculos disponibles.`;
     } catch (err) {
         vehiclesCatalog = [];
@@ -1399,7 +1343,7 @@ async function loadVehiclesFromSheet() {
 
 async function loadDriversFromSheet() {
     try {
-        const response = await fetch(DRIVERS_CSV_URL, { cache: 'no-store' });
+        const response = await fetch(buildNoCacheUrl(DRIVERS_CSV_URL), { cache: 'no-store' });
         if (!response.ok) throw new Error('No se pudo obtener conductores.');
 
         const csvText = await response.text();
@@ -1415,7 +1359,11 @@ async function loadDriversFromSheet() {
             return item;
         });
 
-        driversCatalog = data.filter((item) => item.nombre);
+        driversCatalog = data.filter((item) => {
+            if (!item.nombre) return false;
+            const statusText = normalizeText(item.status);
+            return statusText !== 'disabled' && statusText !== 'inactivo' && statusText !== 'desvinculado';
+        });
         loadDrivers(driversCatalog);
         driverInfo.textContent = `${driversCatalog.length} conductores disponibles.`;
     } catch (err) {
@@ -1446,7 +1394,7 @@ function renderFleet() {
 
 async function loadFleetFromSheet() {
     try {
-        const response = await fetch(FLEET_CSV_URL, { cache: 'no-store' });
+        const response = await fetch(buildNoCacheUrl(FLEET_CSV_URL), { cache: 'no-store' });
         if (!response.ok) throw new Error('No se pudo obtener el parque automotor.');
 
         const csvText = await response.text();
@@ -1519,7 +1467,7 @@ function renderSicovRows() {
 
 async function loadSicovFromSheet() {
     try {
-        const response = await fetch(SICOV_CSV_URL, { cache: 'no-store' });
+        const response = await fetch(buildNoCacheUrl(SICOV_CSV_URL), { cache: 'no-store' });
         if (!response.ok) throw new Error('No se pudo obtener SICOV.');
 
         const csvText = await response.text();
@@ -1690,25 +1638,17 @@ async function init() {
     renderNetworkBadge();
 
     setAutomaticDate();
-    showStep(1);
     setSessionView('dispatch');
     loadItineraryGroups();
     loadItineraries();
+    dispatchDateFilter.value = '';
+    dispatchManagerFilter.value = '';
+    dispatchItineraryFilter.value = '';
     try {
+        resolveLoggedManagerProfile();
         await loadActiveShift();
-        await loadManagerProfile();
         if (activeShift) {
             managerAuthenticated = !shiftSessionMismatch;
-            if (!managerProfile) {
-                managerProfile = {
-                    user_id: currentUser.id,
-                    cedula: '',
-                    full_name: activeShift.manager_name || ''
-                };
-                managerCedula.value = '';
-                managerFullName.value = managerProfile.full_name;
-                setManagerNameLocked(true);
-            }
             if (!shiftSessionMismatch && activeShift.session_token) {
                 setStoredShiftToken(String(activeShift.session_token));
             }
@@ -1723,7 +1663,6 @@ async function init() {
         managerShiftRows = [];
         renderManagerShiftHistoryPage();
         managerShiftHistory.innerHTML = '<div class="no-tasks">No se pudo cargar el historial de labores.</div>';
-        nextStepBtn.disabled = true;
         submitDispatchBtn.disabled = true;
     }
     await loadVehiclesFromSheet();
@@ -1734,14 +1673,36 @@ async function init() {
     await loadDispatches();
 }
 
-async function loadDispatches() {
-    const { data, error } = await sb
-        .from('dispatches')
-        .select('*')
-        .eq('user_id', currentUser.id);
+async function fetchAllDispatches() {
+    const pageSize = 1000;
+    let from = 0;
+    const rows = [];
 
-    if (error) {
-        alert(error.message);
+    while (true) {
+        const to = from + pageSize - 1;
+        const { data, error } = await sb
+            .from('dispatches')
+            .select('*')
+            .order('id', { ascending: false })
+            .range(from, to);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
+        rows.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+    }
+
+    return rows;
+}
+
+async function loadDispatches() {
+    let data = [];
+    try {
+        data = await fetchAllDispatches();
+    } catch (err) {
+        alert(err.message);
         return;
     }
 
@@ -1779,11 +1740,12 @@ function renderDispatches() {
     }
 
     const filtered = dispatchesCache.filter((item) => {
-        const byDate = dispatchDateFilter.value
-            ? getStoredDateKey(item) === dispatchDateFilter.value
-            : true;
+        const byDate = matchesDispatchDate(item, dispatchDateFilter.value);
+        const managerQuery = normalizeText(dispatchManagerFilter.value);
+        const managerText = normalizeText(item.manager || item.user_id || '');
+        const byManager = managerQuery ? managerText.includes(managerQuery) : true;
         const byItinerary = dispatchItineraryFilter.value ? String(item.route || '').trim() === dispatchItineraryFilter.value : true;
-        return byDate && byItinerary;
+        return byDate && byManager && byItinerary;
     });
 
     if (filtered.length === 0) {
@@ -1792,7 +1754,7 @@ function renderDispatches() {
         dispatchPageInfo.textContent = 'Pagina 0 de 0';
         dispatchPrevBtn.disabled = true;
         dispatchNextBtn.disabled = true;
-        const key = `${dispatchDateFilter.value}|${dispatchItineraryFilter.value}`;
+        const key = `${dispatchDateFilter.value}|${dispatchManagerFilter.value}|${dispatchItineraryFilter.value}`;
         if (key !== lastNoDataAlertKey) {
             alert('No hay datos para la fecha/itinerario seleccionados.');
             lastNoDataAlertKey = key;
@@ -1833,6 +1795,7 @@ function renderDispatches() {
 
     pageRows.forEach((dispatch, index) => {
         const isCanceled = !!dispatch.is_canceled;
+        const canEdit = canCurrentManagerEditDispatch(dispatch);
         const card = document.createElement('article');
         card.className = `dispatch-item ${isCanceled ? 'canceled' : ''}`;
 
@@ -1854,7 +1817,7 @@ function renderDispatches() {
             <p><b>Observaciones:</b> ${escapeHtml(dispatch.notes || '-')}</p>
             <p><b>Cancelacion:</b> ${isCanceled ? escapeHtml(dispatch.cancellation_note || 'Sin motivo') : '-'}</p>
             <div class="dispatch-actions">
-                <button onclick="editPassengers(${dispatch.id}, ${dispatch.passenger_count})" ${isCanceled ? 'disabled' : ''}>Editar pasajeros</button>
+                <button onclick="editPassengers(${dispatch.id}, ${dispatch.passenger_count})" ${(isCanceled || !canEdit) ? 'disabled' : ''} title="${canEdit ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Editar pasajeros</button>
             </div>
         `;
 
@@ -1888,7 +1851,7 @@ function renderMissingPassengers() {
                     <p><b>Vehiculo:</b> ${escapeHtml(row.vehicle || '-')}</p>
                     <p><b>Gestor:</b> ${escapeHtml(row.manager || '-')}</p>
                     <div class="dispatch-actions">
-                        <button onclick="editPassengers(${row.id}, ${row.passenger_count})">Ingresar pasajeros</button>
+                        <button onclick="editPassengers(${row.id}, ${row.passenger_count})" ${canCurrentManagerEditDispatch(row) ? '' : 'disabled'} title="${canCurrentManagerEditDispatch(row) ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Ingresar pasajeros</button>
                     </div>
                 </article>
             `).join('')}
@@ -1938,30 +1901,25 @@ function renderSalidas() {
     });
 }
 
-nextStepBtn.addEventListener('click', () => {
-    const err = validateStep1();
-    if (err) {
-        alert(err);
-        return;
-    }
-    showStep(2);
-});
-
-prevStepBtn.addEventListener('click', () => showStep(1));
-
 driver.addEventListener('change', renderDriverInfo);
 vehicle.addEventListener('change', handleVehicleChange);
+vehicle.addEventListener('change', () => {
+    if (vehicle.value) driver.focus();
+});
+driver.addEventListener('change', () => {
+    if (driver.value) departureTime.focus();
+});
+departureTime.addEventListener('change', () => {
+    if (departureTime.value) routeInput.focus();
+});
+routeInput.addEventListener('change', () => {
+    renderRouteSelectedMeta();
+    if (routeInput.value) notes.focus();
+});
 scanVehicleQrBtn.addEventListener('click', startQrScanner);
 qrScannerClose.addEventListener('click', stopQrScanner);
 qrScannerModal.addEventListener('click', (e) => {
     if (e.target === qrScannerModal) stopQrScanner();
-});
-managerCedula.addEventListener('blur', async () => {
-    try {
-        await resolveManagerByCedulaInput();
-    } catch (err) {
-        managerStatus.textContent = `Error validando cedula. (${err.message})`;
-    }
 });
 managerItineraryGroup.addEventListener('change', () => {
     selectedItineraryGroup = managerItineraryGroup.value;
@@ -1970,9 +1928,11 @@ managerItineraryGroup.addEventListener('change', () => {
         const exists = Array.from(routeInput.options).some((opt) => opt.value === routeInput.value);
         if (!exists) routeInput.value = '';
     }
+    renderRouteSelectedMeta();
 });
 itineraryFilter.addEventListener('change', renderSalidas);
 dispatchDateFilter.addEventListener('change', resetDispatchPaginationAndRender);
+dispatchManagerFilter.addEventListener('input', resetDispatchPaginationAndRender);
 dispatchItineraryFilter.addEventListener('change', resetDispatchPaginationAndRender);
 sessionManagerBtn.addEventListener('click', () => setSessionView('manager'));
 sessionDispatchBtn.addEventListener('click', () => setSessionView('dispatch'));
@@ -1982,7 +1942,6 @@ sessionFleetBtn.addEventListener('click', () => setSessionView('fleet'));
 sessionSicovBtn.addEventListener('click', () => setSessionView('sicov'));
 sessionExternalVcBtn.addEventListener('click', () => setSessionView('external-vc'));
 sessionUpdatesBtn.addEventListener('click', () => setSessionView('updates'));
-saveManagerBtn.addEventListener('click', saveManagerProfile);
 startShiftBtn.addEventListener('click', startManagerShift);
 endShiftBtn.addEventListener('click', endManagerShift);
 shiftPrevBtn.addEventListener('click', () => {
@@ -2031,22 +1990,18 @@ dispatchForm.addEventListener('submit', async (e) => {
         return;
     }
 
-    const step1Error = validateStep1();
-    if (step1Error) {
-        showStep(1);
-        alert(step1Error);
+    const formError = validateDispatchForm();
+    if (formError) {
+        alert(formError);
         return;
     }
 
-    const departureIso = getDepartureIsoFromTodayAndTime(departureTime.value);
+    const departureIso = getDepartureIsoFromDateAndTime(departureDate.value, departureTime.value);
+    if (!departureIso) {
+        alert('Fecha de salida invalida. Usa formato DD/MM/YYYY.');
+        return;
+    }
     const departureHour = `${departureTime.value}:00`;
-    const passengersValue = String(passengerCount.value || '').trim();
-    const passengersNumber = passengersValue ? Number(passengersValue) : 0;
-
-    if (passengersValue && (!Number.isInteger(passengersNumber) || passengersNumber < 0)) {
-        alert('Si ingresas pasajeros, debe ser un numero entero mayor o igual a 0.');
-        return;
-    }
 
     const payload = {
         user_id: currentUser.id,
@@ -2055,7 +2010,7 @@ dispatchForm.addEventListener('submit', async (e) => {
         hora_salida: departureHour,
         route: routeInput.value.trim(),
         driver: driver.value.trim(),
-        passenger_count: Number.isInteger(passengersNumber) ? passengersNumber : 0,
+        passenger_count: 0,
         manager: managerProfile.full_name,
         notes: buildDispatchNotesWithMethod(notes.value),
         is_canceled: false,
@@ -2063,9 +2018,13 @@ dispatchForm.addEventListener('submit', async (e) => {
     };
 
     if (!payload.route || !payload.manager) {
-        alert('Completa los campos obligatorios del paso 2.');
+        alert('Completa los campos obligatorios del formulario.');
         return;
     }
+
+    const confirmMessage = `Confirma el despacho:\nVehiculo: ${payload.vehicle}\nConductor: ${payload.driver}\nRuta: ${payload.route}\nFecha/Hora: ${departureDate.value} ${departureTime.value}`;
+    const confirmDispatch = await openDispatchConfirmModal(confirmMessage, 'Confirmar despacho');
+    if (!confirmDispatch) return;
 
     try {
         const validation = await checkVehicleDispatchWindow(payload.vehicle, payload.departure_time, payload.hora_salida);
@@ -2084,7 +2043,6 @@ dispatchForm.addEventListener('submit', async (e) => {
         alert(error.message);
         return;
     }
-
     alert('Despacho registrado exitosamente.');
 
     dispatchForm.reset();
@@ -2096,11 +2054,34 @@ dispatchForm.addEventListener('submit', async (e) => {
     setDispatchAvailability();
     driverInfo.textContent = `${driversCatalog.length} conductores disponibles.`;
     vehicleInfo.textContent = `${vehiclesCatalog.length} vehiculos disponibles.`;
-    showStep(1);
+    vehicle.focus();
     await loadDispatches();
 });
 
 window.editPassengers = async function (id, currentPassengers) {
+    const { data: dispatchRow, error: dispatchError } = await sb
+        .from('dispatches')
+        .select('id, manager')
+        .eq('id', id)
+        .eq('user_id', currentUser.id)
+        .limit(1)
+        .maybeSingle();
+
+    if (dispatchError) {
+        alert(dispatchError.message);
+        return;
+    }
+
+    if (!dispatchRow) {
+        alert('No se encontro el despacho.');
+        return;
+    }
+
+    if (!canCurrentManagerEditDispatch(dispatchRow)) {
+        alert('Solo el gestor que registro este despacho puede editar pasajeros.');
+        return;
+    }
+
     const value = prompt('Nueva cantidad de pasajeros:', String(currentPassengers ?? ''));
     if (value === null) return;
 
@@ -2125,11 +2106,32 @@ window.editPassengers = async function (id, currentPassengers) {
 };
 
 window.logout = async function () {
+    try {
+        await loadActiveShift();
+    } catch (err) {
+        if (activeShift) {
+            alert('No se pudo verificar el turno. Debes finalizar el turno antes de cerrar sesion.');
+            setSessionView('manager');
+            return;
+        }
+    }
+
+    if (activeShift) {
+        alert('Tienes un turno activo. Debes finalizar turno antes de cerrar sesion.');
+        setSessionView('manager');
+        return;
+    }
+
     await sb.auth.signOut();
     location.href = 'index.html';
 };
 
 init();
+
+
+
+
+
 
 
 
