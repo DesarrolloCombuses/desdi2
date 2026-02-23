@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Despachos</title>
+<title>Despachos Combuses</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <link rel="stylesheet" href="styles.css">
@@ -24,7 +24,7 @@
 <div class="dashboard-container">
 
     <nav class="dashboard-nav">
-        <h1>App de Despachos</h1>
+        <h1>Plataforma de Despachos</h1>
         <div>
             <span id="networkStatus" class="network-badge online">En linea</span>
             <span id="userEmail"></span>
@@ -34,19 +34,19 @@
 
     <div class="dashboard-content">
         <div class="session-tabs">
-            <button id="sessionManagerBtn" class="session-tab" type="button">Control gestor</button>
+            <button id="sessionManagerBtn" class="session-tab" type="button">Inicio de labores gestores</button>
             <button id="sessionDispatchBtn" class="session-tab active" type="button">Gestion de despachos</button>
-            <button id="sessionSalidasBtn" class="session-tab" type="button">Lista de salidas</button>
-            <button id="sessionMissingBtn" class="session-tab" type="button">Sin pasajeros</button>
-            <button id="sessionFleetBtn" class="session-tab" type="button">Parque automotor</button>
+            <button id="sessionSalidasBtn" class="session-tab" type="button">planilla de salidas vehiculos</button>
+            <button id="sessionMissingBtn" class="session-tab" type="button">Reporte de viajes sin pasajeros</button>
+            <button id="sessionFleetBtn" class="session-tab" type="button">Parque automotor ERP</button>
             <button id="sessionSicovBtn" class="session-tab" type="button">Preoperacionales SICOV</button>
-            <button id="sessionExternalVcBtn" class="session-tab" type="button">Vehiculo-Conductores</button>
-            <button id="sessionUpdatesBtn" class="session-tab" type="button">Actualizaciones</button>
+            <button id="sessionExternalVcBtn" class="session-tab" type="button">Registros biometricos vehiculos</button>
+            <button id="sessionUpdatesBtn" class="session-tab" type="button">Actualizaciones de datos</button>
         </div>
 
         <section id="managerSession" class="session-view">
             <section class="card">
-                <h2>Control de gestor</h2>
+                <h2>Inicio de labores Gestores</h2>
                 <div class="manager-grid">
                     <p id="managerIdentity" class="driver-info">Gestor: -</p>
                     <select id="managerItineraryGroup">
@@ -76,7 +76,7 @@
             </section>
 
             <section id="dispatchFormCard" class="card">
-                <h2>Nuevo despacho</h2>
+                <h2>Realiza Un Despacho</h2>
 
                 <form id="dispatchForm" class="dispatch-form">
                     <p class="form-guide">Completa en este orden: Vehiculo, conductor, hora, ruta y observaciones.</p>
@@ -132,7 +132,7 @@
 
         <section id="salidasSession" class="session-view">
             <section class="card">
-                <h2>Lista de salidas</h2>
+                <h2>Lista de salidas de Despachos</h2>
                 <div class="dispatch-filters">
                     <select id="itineraryFilter">
                         <option value="">Todos los itinerarios</option>
@@ -224,4 +224,5 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
 
