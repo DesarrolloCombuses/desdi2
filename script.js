@@ -1,4 +1,4 @@
-﻿// Inicializar Supabase correctamente
+// Inicializar Supabase correctamente
 const { createClient } = window.supabase;
 
 const sb = createClient(
@@ -150,4 +150,6 @@ loginForm.addEventListener("submit", async (e) => {
     loginMessage.textContent = err.message;
   }
 })();
+
+
 
