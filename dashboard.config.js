@@ -9,6 +9,7 @@
         EXT_SUPABASE_URL: 'https://atzdrlxucoblgqpqkojm.supabase.co',
         EXT_SUPABASE_ANON_KEY: 'sb_publishable_qc1_0Ol8KcQiAGgc95odnA_UuPy4EyJ',
         EXT_VEHICULO_CONDUCTORES_TABLE: 'vehiculo_conductores',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwMKd6A0KzV6h5SkW_ghbEvmr4qrvH_HbBl0Relrt5gTUQTfXrSh7d9hrSxERM_8_y8vA/exec',
         ITINERARIES: [
             { id: '3386', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-Nutibara-Autopista' },
             { id: '3385', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-San Diego-Tunel' },
@@ -24,4 +25,5 @@
         MANAGER_SHIFT_PAGE_SIZE: 10
     };
 })();
+
 
