@@ -49,6 +49,7 @@ const sbExternal = (EXT_SUPABASE_URL && EXT_SUPABASE_ANON_KEY)
 const LOGIN_LOCK_TABLE = 'user_login_locks';
 const LOCK_TOKEN_KEY = 'combuses_lock_token';
 const LOCK_HEARTBEAT_MS = 60 * 1000;
+const DISPATCH_QUEUE_KEY_PREFIX = 'pending_dispatch_queue:';
 
 let currentUser = null;
 let driversCatalog = [];
@@ -80,10 +81,12 @@ const userEmail = document.getElementById('userEmail');
 const dispatchForm = document.getElementById('dispatchForm');
 const vehicle = document.getElementById('vehicle');
 const vehicleInfo = document.getElementById('vehicleInfo');
+const quickRecentDispatchesList = document.getElementById('quickRecentDispatchesList');
 const vehicleSelectedMeta = document.getElementById('vehicleSelectedMeta');
 const vehicleDocsPanel = document.getElementById('vehicleDocsPanel');
 const departureDate = document.getElementById('departureDate');
 const departureTime = document.getElementById('departureTime');
+const liveClock24 = document.getElementById('liveClock24');
 const routeInput = document.getElementById('route');
 const routeSelectedMeta = document.getElementById('routeSelectedMeta');
 const driver = document.getElementById('driver');
@@ -167,14 +170,49 @@ let qrDetector = null;
 let qrCanvas = null;
 let qrCanvasCtx = null;
 let vehicleDriverLookupSeq = 0;
+let lastVehicleSelectionKey = '';
 let dispatchSubmitInFlight = false;
 let managerShiftActionInFlight = false;
 let loginLockHeartbeatTimer = null;
 let externalVcLoading = false;
 let externalVcAutoRefreshTimer = null;
+let liveClockTimer = null;
+
+function getDispatchQueueStorageKey() {
+    return `${DISPATCH_QUEUE_KEY_PREFIX}${currentUser?.id || 'anon'}`;
+}
+
+function readPendingDispatchQueue() {
+    try {
+        const raw = localStorage.getItem(getDispatchQueueStorageKey()) || '[]';
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function writePendingDispatchQueue(items) {
+    try {
+        localStorage.setItem(getDispatchQueueStorageKey(), JSON.stringify(items));
+    } catch (err) {
+        // Si localStorage falla, no bloqueamos UX.
+    }
+}
+
+function enqueuePendingDispatch(entry) {
+    const queue = readPendingDispatchQueue();
+    queue.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        queued_at: new Date().toISOString(),
+        ...entry
+    });
+    writePendingDispatchQueue(queue);
+    return queue.length;
+}
 
 if (
-    !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !routeInput || !routeSelectedMeta ||
+    !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !quickRecentDispatchesList || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !liveClock24 || !routeInput || !routeSelectedMeta ||
     !driver || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
     !dispatchFormCard || !dispatchListCard || !dispatchLockedNotice ||
     !notes || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !itineraryFilter ||
@@ -625,18 +663,16 @@ function setSessionView(view) {
 function setDispatchAvailability() {
     const hasProfile = !!managerProfile;
     const hasActiveShift = !!activeShift;
-    const enabled = hasProfile && hasActiveShift && managerAuthenticated && hasInternet && !shiftSessionMismatch;
+    const enabled = hasProfile && hasActiveShift && managerAuthenticated && !shiftSessionMismatch;
 
-    const shouldLockByInternet = !hasInternet;
+    const shouldLockByInternet = false;
     const shouldLockByShift = !hasActiveShift;
     const shouldLock = shouldLockByInternet || shouldLockByShift;
 
     dispatchLockedNotice.style.display = shouldLock ? 'block' : 'none';
     dispatchFormCard.style.display = shouldLock ? 'none' : 'block';
     dispatchListCard.style.display = shouldLock ? 'none' : 'block';
-    dispatchLockedText.textContent = shouldLockByInternet
-        ? 'No tienes internet. Debes reconectarte para generar y consultar despachos.'
-        : 'Debes iniciar turno en la pestaña Control gestor para habilitar esta seccion.';
+    dispatchLockedText.textContent = 'Debes iniciar turno en la pestaña Control gestor para habilitar esta seccion.';
     manager.value = enabled ? (managerProfile.full_name || '') : '';
     submitDispatchBtn.disabled = !enabled || dispatchSubmitInFlight;
 
@@ -682,19 +718,113 @@ function renderNetworkBadge() {
     networkStatus.classList.toggle('offline', !hasInternet);
 }
 
+function renderLiveClock24() {
+    const now = new Date();
+    const time = now.toLocaleTimeString('es-CO', {
+        timeZone: 'America/Bogota',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    liveClock24.textContent = `Hora actual (24h): ${time}`;
+}
+
+function startLiveClock24() {
+    if (liveClockTimer) {
+        clearInterval(liveClockTimer);
+        liveClockTimer = null;
+    }
+    renderLiveClock24();
+    liveClockTimer = setInterval(renderLiveClock24, 1000);
+}
+
+function renderQuickRecentDispatches() {
+    if (!dispatchesCache || dispatchesCache.length === 0) {
+        quickRecentDispatchesList.innerHTML = '<p class="quick-empty">Sin datos recientes.</p>';
+        return;
+    }
+
+    const latest = [...dispatchesCache]
+        .sort((a, b) => {
+            const aTs = getDispatchSortTimestamp(a);
+            const bTs = getDispatchSortTimestamp(b);
+            if (aTs !== bTs) return bTs - aTs;
+            return Number(b.id || 0) - Number(a.id || 0);
+        })
+        .slice(0, 3);
+
+    quickRecentDispatchesList.innerHTML = latest.map((row) => `
+        <article class="quick-item">
+            <p><b>${escapeHtml(formatTime24(row.hora_salida || row.departure_time))}</b> | ${escapeHtml(row.vehicle || '-')}</p>
+            <p>${escapeHtml(row.route || '-')}</p>
+        </article>
+    `).join('');
+}
+
 function updateNetworkStatus(shouldAlert) {
     hasInternet = navigator.onLine !== false;
     renderNetworkBadge();
 
     if (!hasInternet && shouldAlert) {
-        alert('No tienes internet. No podras generar despachos hasta reconectarte.');
+        alert('Sin internet: los despachos nuevos se guardaran en local y se sincronizaran cuando vuelva la conexion.');
     }
 
     if (hasInternet && shouldAlert) {
-        alert('Conexion restablecida. Ya puedes generar despachos.');
+        alert('Conexion restablecida. Se intentara sincronizar la cola local de despachos.');
     }
 
     setDispatchAvailability();
+}
+
+async function syncPendingDispatchQueue(showAlert = false) {
+    if (!hasInternet || !currentUser) return;
+
+    const queue = readPendingDispatchQueue();
+    if (queue.length === 0) return;
+
+    const remaining = [];
+    let synced = 0;
+
+    for (const item of queue) {
+        const payload = item?.payload || null;
+        if (!payload) continue;
+
+        try {
+            const { error } = await insertDispatchWithCreatedAtFallback(payload);
+            if (error) {
+                remaining.push(item);
+                continue;
+            }
+
+            const appPayload = item?.appsScriptPayload || null;
+            if (appPayload && appPayload.mId && appPayload.itinerary && appPayload.drvId) {
+                try {
+                    await sendDispatchToAppsScript(appPayload);
+                } catch (err) {
+                    // No bloquea sync de Supabase.
+                }
+            }
+
+            synced += 1;
+        } catch (err) {
+            remaining.push(item);
+        }
+    }
+
+    writePendingDispatchQueue(remaining);
+
+    if (synced > 0) {
+        await loadDispatches();
+    }
+
+    if (showAlert) {
+        if (synced > 0 && remaining.length === 0) {
+            alert(`Sincronizacion completada: ${synced} despacho(s) enviados.`);
+        } else if (synced > 0 && remaining.length > 0) {
+            alert(`Sincronizacion parcial: ${synced} enviados, ${remaining.length} pendientes.`);
+        }
+    }
 }
 
 function showManagerAlertOnce(key, message) {
@@ -716,6 +846,19 @@ function parseCoordPair(lat, lng) {
     if (Number.isNaN(latNum) || Number.isNaN(lngNum)) return null;
     if (Math.abs(latNum) > 90 || Math.abs(lngNum) > 180) return null;
     return [latNum, lngNum];
+}
+
+function formatShiftWorkedTime(startTime, endTime) {
+    if (!startTime) return '-';
+    const startMs = new Date(startTime).getTime();
+    const endMs = new Date(endTime || new Date().toISOString()).getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) return '-';
+
+    const diffMs = Math.max(0, endMs - startMs);
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
 }
 
 function getShiftTokenStorageKey() {
@@ -944,12 +1087,14 @@ function renderManagerShiftHistoryPage() {
         const started = formatDateTime(row.start_time);
         const ended = row.end_time ? formatDateTime(row.end_time) : '-';
         const status = row.end_time ? 'Finalizado' : 'Activo';
+        const worked = formatShiftWorkedTime(row.start_time, row.end_time);
         return `
             <article class="shift-item ${row.end_time ? '' : 'shift-active'}">
                 <p><b>Gestor:</b> ${escapeHtml(row.manager_name || managerProfile?.full_name || '-')}</p>
                 <p><b>Estado:</b> ${escapeHtml(status)}</p>
                 <p><b>Inicio:</b> ${escapeHtml(started)}</p>
                 <p><b>Fin:</b> ${escapeHtml(ended)}</p>
+                <p><b>Horas laboradas:</b> ${escapeHtml(worked)}${row.end_time ? '' : ' (en curso)'}</p>
                 <p><b>Geo inicio:</b> ${escapeHtml(formatCoord(row.start_lat))}, ${escapeHtml(formatCoord(row.start_lng))}</p>
                 <p><b>Geo fin:</b> ${escapeHtml(formatCoord(row.end_lat))}, ${escapeHtml(formatCoord(row.end_lng))}</p>
                 <div class="shift-map-wrap">
@@ -971,6 +1116,9 @@ async function startManagerShift() {
     startShiftBtn.disabled = true;
     endShiftBtn.disabled = true;
     try {
+    const confirmStart = await openDispatchConfirmModal('¿Deseas iniciar turno ahora?', 'Si, iniciar turno');
+    if (!confirmStart) return;
+
     if (!managerProfile) {
         alert('No se pudo identificar el gestor logueado.');
         return;
@@ -1028,7 +1176,7 @@ async function startManagerShift() {
     await loadActiveShift();
     if (activeShift?.session_token) setStoredShiftToken(String(activeShift.session_token));
     setDispatchAvailability();
-    showManagerAlertOnce('shift_started', 'Turno iniciado correctamente.');
+    alert('Turno iniciado correctamente.');
     await loadManagerShiftHistory();
     } finally {
         managerShiftActionInFlight = false;
@@ -1043,6 +1191,9 @@ async function endManagerShift() {
     startShiftBtn.disabled = true;
     endShiftBtn.disabled = true;
     try {
+    const confirmEnd = await openDispatchConfirmModal('¿Deseas finalizar turno ahora?', 'Si, finalizar turno');
+    if (!confirmEnd) return;
+
     if (!activeShift) {
         alert('No tienes un turno activo para finalizar.');
         return;
@@ -1069,7 +1220,7 @@ async function endManagerShift() {
     clearStoredShiftToken();
     managerAuthenticated = true;
     setDispatchAvailability();
-    showManagerAlertOnce('shift_ended', 'Turno finalizado correctamente.');
+    alert('Turno finalizado correctamente.');
     await loadManagerShiftHistory();
     } finally {
         managerShiftActionInFlight = false;
@@ -1328,9 +1479,20 @@ function renderDriverInfo() {
 }
 
 function handleVehicleChange() {
+    const currentVehicleKey = normalizeVehicleKey(vehicle.value);
+    const vehicleChanged = currentVehicleKey !== lastVehicleSelectionKey;
+    lastVehicleSelectionKey = currentVehicleKey;
+
     if (!qrSelectionInProgress) {
         dispatchEntryMethod = 'manual';
     }
+
+    if (vehicleChanged) {
+        driver.value = '';
+        driverInfo.textContent = 'Selecciona un conductor de la lista.';
+        renderDriverSelectedMeta();
+    }
+
     renderVehicleSelectedMeta();
     renderVehicleDocsStatus();
     autoFillDriverFromExternalByVehicle();
@@ -1613,14 +1775,21 @@ function renderFleet() {
     }
 
     fleetList.innerHTML = `
-        <div class="fleet-grid">
-            ${fleetRows.map((row) => `
-                <article class="fleet-item">
-                    ${fleetHeaders.map((header) => `
-                        <p><b>${escapeHtml(header)}:</b> ${escapeHtml(row[header] || '-')}</p>
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        ${fleetHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${fleetRows.map((row) => `
+                        <tr>
+                            ${fleetHeaders.map((header) => `<td>${escapeHtml(row[header] || '-')}</td>`).join('')}
+                        </tr>
                     `).join('')}
-                </article>
-            `).join('')}
+                </tbody>
+            </table>
         </div>
     `;
 }
@@ -1686,14 +1855,21 @@ function renderSicovRows() {
     }
 
     sicovList.innerHTML = `
-        <div class="fleet-grid">
-            ${filtered.map((row) => `
-                <article class="fleet-item">
-                    ${sicovHeaders.map((header) => `
-                        <p><b>${escapeHtml(header)}:</b> ${escapeHtml(row[header] || '-')}</p>
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        ${sicovHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filtered.map((row) => `
+                        <tr>
+                            ${sicovHeaders.map((header) => `<td>${escapeHtml(row[header] || '-')}</td>`).join('')}
+                        </tr>
                     `).join('')}
-                </article>
-            `).join('')}
+                </tbody>
+            </table>
         </div>
     `;
 }
@@ -1890,6 +2066,7 @@ async function init() {
     renderNetworkBadge();
     await refreshLoginLock();
     startLoginLockHeartbeat();
+    startLiveClock24();
 
     setAutomaticDate();
     setSessionView('dispatch');
@@ -1926,6 +2103,7 @@ async function init() {
     await loadExternalVehiculoConductores();
     startExternalVcAutoRefresh();
     await loadDispatches();
+    await syncPendingDispatchQueue(false);
 }
 
 async function fetchAllDispatchesByDate(dateKey) {
@@ -1981,6 +2159,7 @@ async function loadDispatches() {
         renderItineraryFilter([]);
         renderDispatchFilters([]);
         renderMissingItineraryFilter([]);
+        renderQuickRecentDispatches();
         dispatchesList.innerHTML = '<div class="no-tasks">No hay despachos registrados.</div>';
         salidasList.innerHTML = '<div class="no-tasks">No hay salidas disponibles.</div>';
         missingPassengerList.innerHTML = '<div class="no-tasks">No hay viajes sin pasajeros.</div>';
@@ -1995,6 +2174,7 @@ async function loadDispatches() {
     renderDispatches();
     renderMissingPassengers();
     renderSalidas();
+    renderQuickRecentDispatches();
 }
 
 function renderDispatches() {
@@ -2239,7 +2419,10 @@ refreshFleetCsvBtn.addEventListener('click', () => refreshCsv('fleet'));
 refreshSicovCsvBtn.addEventListener('click', () => refreshCsv('sicov'));
 refreshExternalVcBtn.addEventListener('click', () => refreshCsv('external-vc'));
 window.addEventListener('offline', () => updateNetworkStatus(true));
-window.addEventListener('online', () => updateNetworkStatus(true));
+window.addEventListener('online', async () => {
+    updateNetworkStatus(true);
+    await syncPendingDispatchQueue(true);
+});
 window.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
         loadExternalVehiculoConductores();
@@ -2255,6 +2438,10 @@ window.addEventListener('beforeunload', () => {
         clearInterval(externalVcAutoRefreshTimer);
         externalVcAutoRefreshTimer = null;
     }
+    if (liveClockTimer) {
+        clearInterval(liveClockTimer);
+        liveClockTimer = null;
+    }
 });
 
 dispatchForm.addEventListener('submit', async (e) => {
@@ -2265,13 +2452,9 @@ dispatchForm.addEventListener('submit', async (e) => {
     setDispatchAvailability();
 
     try {
-    if (navigator.onLine === false || !hasInternet) {
-        hasInternet = false;
-        renderNetworkBadge();
-        setDispatchAvailability();
-        alert('Sin internet: no es posible guardar el despacho en este momento.');
-        return;
-    }
+    hasInternet = navigator.onLine !== false;
+    renderNetworkBadge();
+    setDispatchAvailability();
 
     if (!managerProfile || !activeShift) {
         alert('Debes tener un gestor registrado y turno activo para generar despachos.');
@@ -2324,38 +2507,46 @@ dispatchForm.addEventListener('submit', async (e) => {
     const confirmDispatch = await openDispatchConfirmModal(confirmMessage, 'Confirmar despacho');
     if (!confirmDispatch) return;
 
-    try {
-        const validation = await checkVehicleDispatchWindow(payload.vehicle, payload.departure_time, payload.hora_salida);
-        if (validation.shouldConfirm) {
-            const proceed = await openDispatchConfirmModal(validation.message);
-            if (!proceed) return;
-        }
-    } catch (validationErr) {
-        alert(`No se pudo validar ventana de 30 minutos. (${validationErr.message})`);
-        return;
-    }
-
-    const { error } = await insertDispatchWithCreatedAtFallback(payload);
-
-    if (error) {
-        alert(error.message);
-        return;
-    }
-
-    if (!appsScriptPayload.mId || !appsScriptPayload.itinerary || !appsScriptPayload.drvId) {
-        alert('Despacho registrado. No se envio al servicio externo porque faltan IDs.');
+    if (!hasInternet) {
+        const pending = enqueuePendingDispatch({
+            payload,
+            appsScriptPayload
+        });
+        alert(`Despacho guardado en modo local. Pendientes por sincronizar: ${pending}.`);
     } else {
         try {
-            const bridgeResult = await sendDispatchToAppsScript(appsScriptPayload);
-            if (bridgeResult?.skipped) {
-                alert('Despacho registrado. El enlace de envio no esta configurado.');
-            } else if (bridgeResult?.success === false) {
-                alert(`Despacho registrado. El servicio externo reporto error: ${bridgeResult.message || 'sin detalle'}`);
-            } else {
-                alert('Despacho registrado y envio externo realizado.');
+            const validation = await checkVehicleDispatchWindow(payload.vehicle, payload.departure_time, payload.hora_salida);
+            if (validation.shouldConfirm) {
+                const proceed = await openDispatchConfirmModal(validation.message);
+                if (!proceed) return;
             }
-        } catch (bridgeErr) {
-            alert(`Despacho registrado, pero el envio externo fallo: ${bridgeErr.message}`);
+        } catch (validationErr) {
+            alert(`No se pudo validar ventana de 30 minutos. (${validationErr.message})`);
+            return;
+        }
+
+        const { error } = await insertDispatchWithCreatedAtFallback(payload);
+
+        if (error) {
+            alert(error.message);
+            return;
+        }
+
+        if (!appsScriptPayload.mId || !appsScriptPayload.itinerary || !appsScriptPayload.drvId) {
+            alert('Despacho registrado. No se envio al servicio externo porque faltan IDs.');
+        } else {
+            try {
+                const bridgeResult = await sendDispatchToAppsScript(appsScriptPayload);
+                if (bridgeResult?.skipped) {
+                    alert('Despacho registrado. El enlace de envio no esta configurado.');
+                } else if (bridgeResult?.success === false) {
+                    alert(`Despacho registrado. El servicio externo reporto error: ${bridgeResult.message || 'sin detalle'}`);
+                } else {
+                    alert('Despacho registrado y envio externo realizado.');
+                }
+            } catch (bridgeErr) {
+                alert(`Despacho registrado, pero el envio externo fallo: ${bridgeErr.message}`);
+            }
         }
     }
 
@@ -2369,7 +2560,10 @@ dispatchForm.addEventListener('submit', async (e) => {
     driverInfo.textContent = `${driversCatalog.length} conductores disponibles.`;
     vehicleInfo.textContent = `${vehiclesCatalog.length} vehiculos disponibles.`;
     vehicle.focus();
-    await loadDispatches();
+    if (hasInternet) {
+        await loadDispatches();
+        await syncPendingDispatchQueue(false);
+    }
     } finally {
         dispatchSubmitInFlight = false;
         setDispatchSubmitLoading(false);
@@ -2409,6 +2603,12 @@ window.editPassengers = async function (id, currentPassengers) {
         alert('Ingresa un numero entero mayor a 0.');
         return;
     }
+
+    const confirmUpdate = await openDispatchConfirmModal(
+        `¿Confirmas actualizar pasajeros a ${parsed}?`,
+        'Si, guardar'
+    );
+    if (!confirmUpdate) return;
 
     const { error } = await sb
         .from('dispatches')
@@ -2452,6 +2652,10 @@ window.logout = async function () {
 };
 
 init();
+
+
+
+
 
 
 
