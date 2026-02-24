@@ -76,7 +76,8 @@
             </section>
 
             <section id="dispatchFormCard" class="card">
-                <h2>Realiza Un Despacho</h2>
+                <h2 class="dispatch-title"><span class="dispatch-title-icon">&#128336;</span> Realiza Un Despacho</h2>
+                <p id="liveClock24" class="driver-info live-clock">Hora actual (24h): --:--:--</p>
 
                 <form id="dispatchForm" class="dispatch-form">
                     <p class="form-guide">Completa en este orden: Vehiculo, conductor, hora, ruta y observaciones.</p>
@@ -84,6 +85,12 @@
                         <option value="">1) Selecciona vehiculo</option>
                     </select>
                     <button type="button" id="scanVehicleQrBtn" class="btn-secondary">Leer QR vehiculo</button>
+                    <div id="quickRecentDispatches" class="quick-dispatches">
+                        <p class="quick-title">Ultimos despachos realizados</p>
+                        <div id="quickRecentDispatchesList" class="quick-list">
+                            <p class="quick-empty">Sin datos recientes.</p>
+                        </div>
+                    </div>
                     <p id="vehicleInfo" class="driver-info">Cargando vehiculos...</p>
                     <p id="vehicleSelectedMeta" class="driver-info">ID vehiculo: -</p>
                     <div id="vehicleDocsPanel" class="vehicle-docs" style="display:none;"></div>
@@ -224,6 +231,7 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
 
 
 
