@@ -294,6 +294,18 @@ body {
     margin-bottom: 15px;
 }
 
+.dispatch-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 22px;
+}
+
+.dispatch-title-icon {
+    font-size: 24px;
+    line-height: 1;
+}
+
 .manager-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -385,12 +397,52 @@ body {
     color: #4b5563;
 }
 
+.live-clock {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: 22px;
+}
+
 .vehicle-docs {
     grid-column: 1 / -1;
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
     padding: 10px;
+}
+
+.quick-dispatches {
+    grid-column: 1 / -1;
+    border: 1px solid #dbeafe;
+    background: #f8fbff;
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.quick-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e3a8a;
+    margin-bottom: 8px;
+}
+
+.quick-list {
+    display: grid;
+    gap: 6px;
+}
+
+.quick-item {
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 13px;
+    color: #334155;
+}
+
+.quick-empty {
+    font-size: 13px;
+    color: #64748b;
 }
 
 .doc-line {
@@ -579,6 +631,43 @@ body {
 
 .fleet-list {
     margin-top: 10px;
+}
+
+.data-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+}
+
+.data-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.data-table thead tr {
+    background: #e0e7ff;
+}
+
+.data-table th,
+.data-table td {
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #334155;
+    white-space: nowrap;
+}
+
+.data-table th {
+    font-weight: 700;
+    color: #1e3a8a;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background: #f8fafc;
 }
 
 .fleet-grid {
@@ -807,12 +896,89 @@ body {
 }
 
 @media (max-width: 768px) {
+    body {
+        font-size: 17px;
+    }
+
+    .card h2 {
+        font-size: 22px;
+    }
+
+    .session-tab {
+        font-size: 15px;
+        padding: 10px 14px;
+    }
+
+    .dispatch-form input,
+    .dispatch-form select,
+    .dispatch-form textarea,
+    .dispatch-filters-advanced input,
+    .dispatch-filters-advanced select,
+    #sicovFilter,
+    #externalVcFilter,
+    .manager-grid select {
+        font-size: 16px;
+        min-height: 52px;
+        padding: 14px 12px;
+    }
+
+    .driver-info,
+    .doc-line,
+    .quick-item,
+    .quick-title,
+    .quick-empty,
+    .fleet-item p,
+    .salida-route,
+    .salida-vehicle,
+    .salida-driver,
+    .dispatch-item p {
+        font-size: 15px;
+    }
+
+    .btn-primary,
+    .btn-secondary,
+    .btn-logout,
+    .dispatch-actions button {
+        font-size: 16px;
+        min-height: 54px;
+        padding: 14px 16px;
+    }
+
+    .dispatch-order,
+    .salida-order,
+    .status {
+        font-size: 14px;
+    }
+
     .dispatch-form {
         grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .dispatch-form label {
+        margin-bottom: -2px;
+    }
+
+    .dispatch-item,
+    .fleet-item,
+    .missing-item,
+    .shift-item {
+        padding: 14px;
+    }
+
+    .dispatch-actions {
+        gap: 10px;
+    }
+
+    .dispatch-pagination,
+    .history-pagination {
+        gap: 12px;
+        margin-top: 14px;
     }
 
     .manager-grid {
         grid-template-columns: 1fr;
+        gap: 14px;
     }
 
     .add-task {
@@ -833,15 +999,18 @@ body {
 
     .session-tabs {
         flex-wrap: wrap;
+        gap: 10px;
     }
 
     .csv-actions {
         grid-template-columns: 1fr;
+        gap: 10px;
     }
 
     .card {
-        padding: 14px;
+        padding: 16px;
         border-radius: 12px;
+        margin-bottom: 14px;
     }
 
     .dispatches-list {
@@ -874,6 +1043,10 @@ body {
         grid-template-columns: 1fr;
     }
 
+    .data-table {
+        min-width: 640px;
+    }
+
     .missing-grid {
         grid-template-columns: 1fr;
     }
@@ -897,6 +1070,9 @@ body {
 
 .shift-map-wrap { margin-top: 8px; }
 .shift-map { width: 100%; height: 160px; border-radius: 8px; border: 1px solid #cbd5e1; }
+
+
+
 
 
 
