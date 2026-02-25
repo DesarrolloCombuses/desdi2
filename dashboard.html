@@ -81,6 +81,7 @@
 
                 <form id="dispatchForm" class="dispatch-form">
                     <p class="form-guide">Completa en este orden: Vehiculo, conductor, hora, ruta y observaciones.</p>
+                    <input type="text" id="vehicleSearch" placeholder="Buscar vehiculo por placa, ID o interno">
                     <select id="vehicle" required>
                         <option value="">1) Selecciona vehiculo</option>
                     </select>
@@ -95,6 +96,7 @@
                     <p id="vehicleSelectedMeta" class="driver-info">ID vehiculo: -</p>
                     <div id="vehicleDocsPanel" class="vehicle-docs" style="display:none;"></div>
 
+                    <input type="text" id="driverSearch" placeholder="Buscar conductor por nombre, cedula o ID">
                     <select id="driver" required>
                         <option value="">2) Selecciona conductor</option>
                     </select>
@@ -231,6 +233,7 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
 
 
 
