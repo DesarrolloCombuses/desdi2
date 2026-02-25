@@ -80,6 +80,7 @@ const SHIFT_TOKEN_STORAGE_PREFIX = 'manager_shift_token:';
 const userEmail = document.getElementById('userEmail');
 const dispatchForm = document.getElementById('dispatchForm');
 const vehicle = document.getElementById('vehicle');
+const vehicleSearch = document.getElementById('vehicleSearch');
 const vehicleInfo = document.getElementById('vehicleInfo');
 const quickRecentDispatchesList = document.getElementById('quickRecentDispatchesList');
 const vehicleSelectedMeta = document.getElementById('vehicleSelectedMeta');
@@ -90,6 +91,7 @@ const liveClock24 = document.getElementById('liveClock24');
 const routeInput = document.getElementById('route');
 const routeSelectedMeta = document.getElementById('routeSelectedMeta');
 const driver = document.getElementById('driver');
+const driverSearch = document.getElementById('driverSearch');
 const driverSelectedMeta = document.getElementById('driverSelectedMeta');
 const manager = document.getElementById('manager');
 const managerIdentity = document.getElementById('managerIdentity');
@@ -212,8 +214,8 @@ function enqueuePendingDispatch(entry) {
 }
 
 if (
-    !userEmail || !dispatchForm || !vehicle || !vehicleInfo || !quickRecentDispatchesList || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !liveClock24 || !routeInput || !routeSelectedMeta ||
-    !driver || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
+    !userEmail || !dispatchForm || !vehicle || !vehicleSearch || !vehicleInfo || !quickRecentDispatchesList || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !liveClock24 || !routeInput || !routeSelectedMeta ||
+    !driver || !driverSearch || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
     !dispatchFormCard || !dispatchListCard || !dispatchLockedNotice ||
     !notes || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !itineraryFilter ||
     !dispatchDateFilter || !dispatchManagerFilter || !dispatchItineraryFilter ||
@@ -1275,9 +1277,27 @@ function loadItineraryGroups() {
 }
 
 function loadVehicles(catalog) {
+    const selectedValue = String(vehicle.value || '').trim();
+    const query = normalizeText(vehicleSearch.value);
     vehicle.innerHTML = '<option value="">Selecciona vehiculo</option>';
 
-    catalog.forEach((item) => {
+    const sortedCatalog = [...catalog].sort((a, b) => {
+        const aKey = String(a.descripcion || a.id || a.placa || '').trim();
+        const bKey = String(b.descripcion || b.id || b.placa || '').trim();
+        const aNum = Number(aKey);
+        const bNum = Number(bKey);
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+        return aKey.localeCompare(bKey, 'es', { numeric: true, sensitivity: 'base' });
+    });
+
+    const filteredCatalog = query
+        ? sortedCatalog.filter((item) => {
+            const bag = normalizeText(`${item.placa || ''} ${item.id || ''} ${item.descripcion || ''}`);
+            return bag.includes(query);
+        })
+        : sortedCatalog;
+
+    filteredCatalog.forEach((item) => {
         const placa = item.placa || '';
         const id = item.id || '';
         const descripcion = item.descripcion || '';
@@ -1288,6 +1308,11 @@ function loadVehicles(catalog) {
         option.textContent = label;
         vehicle.appendChild(option);
     });
+
+    if (selectedValue) {
+        const exists = Array.from(vehicle.options).some((opt) => opt.value === selectedValue);
+        vehicle.value = exists ? selectedValue : '';
+    }
 
     renderVehicleSelectedMeta();
 }
@@ -1420,6 +1445,8 @@ function renderMissingItineraryFilter(data) {
 }
 
 function loadDrivers(catalog) {
+    const selectedValue = String(driver.value || '').trim();
+    const query = normalizeText(driverSearch.value);
     driver.innerHTML = '<option value="">Selecciona conductor</option>';
 
     const enabledCatalog = catalog.filter((item) => {
@@ -1432,13 +1459,25 @@ function loadDrivers(catalog) {
         ...enabledCatalog.filter((item) => !isActiveDriverStatus(item.status))
     ];
 
-    activeFirst.forEach((item) => {
+    const filtered = query
+        ? activeFirst.filter((item) => {
+            const bag = normalizeText(`${item.nombre || ''} ${item.cedula || ''} ${item.dr_id || ''}`);
+            return bag.includes(query);
+        })
+        : activeFirst;
+
+    filtered.forEach((item) => {
         const label = `${item.nombre} (${item.cedula || 'sin cedula'})`;
         const option = document.createElement('option');
         option.value = item.nombre;
         option.textContent = label;
         driver.appendChild(option);
     });
+
+    if (selectedValue) {
+        const exists = Array.from(driver.options).some((opt) => opt.value === selectedValue);
+        driver.value = exists ? selectedValue : '';
+    }
 
     renderDriverSelectedMeta();
 }
@@ -2352,6 +2391,11 @@ function renderSalidas() {
 
 driver.addEventListener('change', renderDriverInfo);
 vehicle.addEventListener('change', handleVehicleChange);
+vehicleSearch.addEventListener('input', () => loadVehicles(vehiclesCatalog));
+driverSearch.addEventListener('input', () => {
+    loadDrivers(driversCatalog);
+    renderDriverInfo();
+});
 vehicle.addEventListener('change', () => {
     if (vehicle.value) driver.focus();
 });
@@ -2550,10 +2594,12 @@ dispatchForm.addEventListener('submit', async (e) => {
         }
     }
 
-    dispatchForm.reset();
-    setAutomaticDate();
-    loadVehicles(vehiclesCatalog);
-    loadDrivers(driversCatalog);
+        dispatchForm.reset();
+        vehicleSearch.value = '';
+        driverSearch.value = '';
+        setAutomaticDate();
+        loadVehicles(vehiclesCatalog);
+        loadDrivers(driversCatalog);
     loadItineraries();
     dispatchEntryMethod = 'manual';
     setDispatchAvailability();
@@ -2652,6 +2698,10 @@ window.logout = async function () {
 };
 
 init();
+
+
+
+
 
 
 
