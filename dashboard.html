@@ -47,6 +47,8 @@
         <section id="managerSession" class="session-view">
             <section class="card">
                 <h2>Inicio de labores Gestores</h2>
+                <p class="user-guide">Guia: 1) Verifica tu identidad de gestor, 2) selecciona grupo si aplica, 3) inicia turno al comenzar labores, 4) finaliza turno al terminar.</p>
+                <p id="managerStepGuide" class="step-guide">Paso 1/3: valida tu identidad de gestor.</p>
                 <div class="manager-grid">
                     <p id="managerIdentity" class="driver-info">Gestor: -</p>
                     <select id="managerItineraryGroup">
@@ -78,9 +80,11 @@
             <section id="dispatchFormCard" class="card">
                 <h2 class="dispatch-title"><span class="dispatch-title-icon">&#128336;</span> Realiza Un Despacho</h2>
                 <p id="liveClock24" class="driver-info live-clock">Hora actual (24h): --:--:--</p>
+                <p class="user-guide">Guia: selecciona vehiculo y conductor, confirma hora/ruta y registra observaciones del viaje. Luego pulsa Realizar Despacho.</p>
 
                 <form id="dispatchForm" class="dispatch-form">
                     <p class="form-guide">Completa en este orden: Vehiculo, conductor, hora, ruta y observaciones.</p>
+                    <p id="dispatchStepGuide" class="step-guide">Paso 1/4: Selecciona vehiculo.</p>
                     <input type="text" id="vehicleSearch" placeholder="Buscar vehiculo por placa, ID o interno">
                     <select id="vehicle" required>
                         <option value="">1) Selecciona vehiculo</option>
@@ -122,6 +126,7 @@
 
             <section id="dispatchListCard" class="card">
                 <h2>Despachos registrados</h2>
+                <p class="user-guide">Guia: usa filtros por fecha, usuario o itinerario. En cada despacho puedes editar pasajeros solo si eres el gestor que lo registro.</p>
                 <div class="dispatch-filters dispatch-filters-advanced">
                     <input type="date" id="dispatchDateFilter">
                     <input type="text" id="dispatchManagerFilter" placeholder="Filtrar por usuario/gestor">
@@ -142,10 +147,15 @@
         <section id="salidasSession" class="session-view">
             <section class="card">
                 <h2>Lista de salidas de Despachos</h2>
+                <p class="user-guide">Guia: filtra por fecha e itinerario para revisar planilla. Desde esta vista puedes editar observaciones y descargar el archivo para Excel.</p>
                 <div class="dispatch-filters">
+                    <input type="date" id="salidasDateFilter">
                     <select id="itineraryFilter">
                         <option value="">Todos los itinerarios</option>
                     </select>
+                </div>
+                <div class="dispatch-filters">
+                    <button id="exportSalidasBtn" type="button" class="btn-secondary">Descargar planilla (Excel)</button>
                 </div>
                 <div id="salidasList" class="salidas-list"></div>
             </section>
@@ -194,6 +204,7 @@
         <section id="missingSession" class="session-view">
             <section class="card">
                 <h2>Viajes sin pasajeros</h2>
+                <p class="user-guide">Guia: aqui se listan despachos con pasajeros faltantes. Ingresa pasajeros y completa observaciones para cerrar el registro correctamente.</p>
                 <div class="dispatch-filters">
                     <select id="missingItineraryFilter">
                         <option value="">Todos los itinerarios</option>
@@ -233,6 +244,7 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
 
 
 
