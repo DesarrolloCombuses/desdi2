@@ -11,15 +11,17 @@
         EXT_VEHICULO_CONDUCTORES_TABLE: 'vehiculo_conductores',
         APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwMKd6A0KzV6h5SkW_ghbEvmr4qrvH_HbBl0Relrt5gTUQTfXrSh7d9hrSxERM_8_y8vA/exec',
         ITINERARIES: [
+            { id: '3386', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-Nutibara-Autopista' },
+            { id: '3385', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-San Diego-Tunel' },
+            { id: '3911', grupo: 'EXPOSICIONES', nombre: 'Exposiciones-Aeropuerto-Tunel' },
+            { id: '3387', grupo: 'NUTIBARA', nombre: 'Nutibara-Aeropuerto-Autopista' },
+            { id: '3393', grupo: 'NUTIBARA', nombre: 'Nutibara-Aeropuerto-Tunel' },
+            { id: '3394', grupo: 'NUTIBARA', nombre: 'Nutibara-Aeropuerto-Variante Palmas' },
             { id: '3384', grupo: 'SANDIEGO', nombre: 'San Diego-Aeropuerto-Tunel' },
-            { id: '3395', grupo: 'SANDIEGO', nombre: 'San Diego-Aeropuerto-Variante Palmas' }
+            { id: '3395', grupo: 'SANDIEGO', nombre: 'San Diego-Aeropuerto-Variante Palmas' },
+            { id: '4413', grupo: 'AEROPUERTO', nombre: 'Aeropuerto-Exposiciones' }
         ],
         DISPATCH_PAGE_SIZE: 35,
         MANAGER_SHIFT_PAGE_SIZE: 10
     };
 })();
-
-
-
-
-
