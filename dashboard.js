@@ -46,10 +46,8 @@ const sbExternal = (EXT_SUPABASE_URL && EXT_SUPABASE_ANON_KEY)
         }
     })
     : null;
-const LOGIN_LOCK_TABLE = 'user_login_locks';
-const LOCK_TOKEN_KEY = 'combuses_lock_token';
-const LOCK_HEARTBEAT_MS = 60 * 1000;
 const DISPATCH_QUEUE_KEY_PREFIX = 'pending_dispatch_queue:';
+const DISPATCH_SNAPSHOT_KEY_PREFIX = 'dispatch_snapshot:';
 
 let currentUser = null;
 let driversCatalog = [];
@@ -76,6 +74,7 @@ let shiftMapInstances = [];
 let suppressManagerAlerts = false;
 let shiftSessionMismatch = false;
 const SHIFT_TOKEN_STORAGE_PREFIX = 'manager_shift_token:';
+const ITINERARY_GROUP_SESSION_PREFIX = 'manager_itinerary_group:';
 
 const userEmail = document.getElementById('userEmail');
 const dispatchForm = document.getElementById('dispatchForm');
@@ -99,11 +98,13 @@ const managerItineraryGroup = document.getElementById('managerItineraryGroup');
 const startShiftBtn = document.getElementById('startShiftBtn');
 const endShiftBtn = document.getElementById('endShiftBtn');
 const managerStatus = document.getElementById('managerStatus');
+const managerStepGuide = document.getElementById('managerStepGuide');
 const managerShiftHistory = document.getElementById('managerShiftHistory');
 const shiftPrevBtn = document.getElementById('shiftPrevBtn');
 const shiftNextBtn = document.getElementById('shiftNextBtn');
 const shiftPageInfo = document.getElementById('shiftPageInfo');
 const notes = document.getElementById('notes');
+const dispatchStepGuide = document.getElementById('dispatchStepGuide');
 const driverInfo = document.getElementById('driverInfo');
 const dispatchFormCard = document.getElementById('dispatchFormCard');
 const dispatchListCard = document.getElementById('dispatchListCard');
@@ -115,7 +116,9 @@ const dispatchPageInfo = document.getElementById('dispatchPageInfo');
 const missingPassengerList = document.getElementById('missingPassengerList');
 const missingItineraryFilter = document.getElementById('missingItineraryFilter');
 const salidasList = document.getElementById('salidasList');
+const salidasDateFilter = document.getElementById('salidasDateFilter');
 const itineraryFilter = document.getElementById('itineraryFilter');
+const exportSalidasBtn = document.getElementById('exportSalidasBtn');
 const dispatchDateFilter = document.getElementById('dispatchDateFilter');
 const dispatchManagerFilter = document.getElementById('dispatchManagerFilter');
 const dispatchItineraryFilter = document.getElementById('dispatchItineraryFilter');
@@ -175,13 +178,66 @@ let vehicleDriverLookupSeq = 0;
 let lastVehicleSelectionKey = '';
 let dispatchSubmitInFlight = false;
 let managerShiftActionInFlight = false;
-let loginLockHeartbeatTimer = null;
 let externalVcLoading = false;
 let externalVcAutoRefreshTimer = null;
 let liveClockTimer = null;
+let dispatchReloadInFlight = false;
+let currentDispatchStepTarget = null;
+let currentManagerStepTarget = null;
 
 function getDispatchQueueStorageKey() {
     return `${DISPATCH_QUEUE_KEY_PREFIX}${currentUser?.id || 'anon'}`;
+}
+
+function getDispatchSnapshotStorageKey(dateKey) {
+    const safeDate = String(dateKey || 'all').trim() || 'all';
+    return `${DISPATCH_SNAPSHOT_KEY_PREFIX}${currentUser?.id || 'anon'}:${safeDate}`;
+}
+
+function readDispatchSnapshot(dateKey) {
+    try {
+        const raw = localStorage.getItem(getDispatchSnapshotStorageKey(dateKey)) || '[]';
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function writeDispatchSnapshot(dateKey, rows) {
+    try {
+        localStorage.setItem(
+            getDispatchSnapshotStorageKey(dateKey),
+            JSON.stringify(Array.isArray(rows) ? rows : [])
+        );
+    } catch (err) {
+        // Ignorado: si falla localStorage no bloqueamos flujo.
+    }
+}
+
+function getItineraryGroupStorageKey() {
+    return `${ITINERARY_GROUP_SESSION_PREFIX}${currentUser?.id || 'anon'}`;
+}
+
+function getStoredItineraryGroup() {
+    try {
+        return sessionStorage.getItem(getItineraryGroupStorageKey()) || '';
+    } catch (err) {
+        return '';
+    }
+}
+
+function setStoredItineraryGroup(value) {
+    try {
+        const safeValue = String(value || '').trim();
+        if (!safeValue) {
+            sessionStorage.removeItem(getItineraryGroupStorageKey());
+            return;
+        }
+        sessionStorage.setItem(getItineraryGroupStorageKey(), safeValue);
+    } catch (err) {
+        // Ignorado: sessionStorage puede estar bloqueado.
+    }
 }
 
 function readPendingDispatchQueue() {
@@ -215,9 +271,9 @@ function enqueuePendingDispatch(entry) {
 
 if (
     !userEmail || !dispatchForm || !vehicle || !vehicleSearch || !vehicleInfo || !quickRecentDispatchesList || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !liveClock24 || !routeInput || !routeSelectedMeta ||
-    !driver || !driverSearch || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
+    !driver || !driverSearch || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerStepGuide || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
     !dispatchFormCard || !dispatchListCard || !dispatchLockedNotice ||
-    !notes || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !itineraryFilter ||
+    !notes || !dispatchStepGuide || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !salidasDateFilter || !itineraryFilter || !exportSalidasBtn ||
     !dispatchDateFilter || !dispatchManagerFilter || !dispatchItineraryFilter ||
     !sessionManagerBtn || !sessionDispatchBtn || !sessionSalidasBtn || !sessionMissingBtn || !sessionFleetBtn || !sessionSicovBtn || !sessionExternalVcBtn || !sessionUpdatesBtn || !managerSession || !dispatchSession || !salidasSession || !missingSession || !fleetSession || !sicovSession || !externalVcSession || !updatesSession || !fleetStatus || !fleetList || !sicovStatus || !sicovList || !sicovFilter || !externalVcStatus || !externalVcList || !externalVcFilter ||
     !refreshAllCsvBtn || !refreshVehiclesCsvBtn || !refreshDriversCsvBtn || !refreshFleetCsvBtn || !refreshSicovCsvBtn || !refreshExternalVcBtn ||
@@ -331,6 +387,31 @@ function buildDispatchNotesWithMethod(userText) {
         : 'Despacho generado manualmente';
     const clean = String(userText || '').trim();
     return clean ? `${modeText}. ${clean}` : modeText;
+}
+
+function splitDispatchMethodNotes(fullNotes) {
+    const raw = String(fullNotes || '').trim();
+    const methodPrefixes = [
+        'Despacho generado por lectura QR',
+        'Despacho generado manualmente'
+    ];
+
+    for (const prefix of methodPrefixes) {
+        if (raw === prefix) {
+            return { prefix, extra: '' };
+        }
+        if (raw.startsWith(`${prefix}. `)) {
+            return { prefix, extra: raw.slice(prefix.length + 2).trim() };
+        }
+    }
+
+    return { prefix: '', extra: raw };
+}
+
+function getVisibleDispatchNotes(fullNotes) {
+    const split = splitDispatchMethodNotes(fullNotes);
+    if (split.prefix) return split.extra || '';
+    return String(fullNotes || '').trim();
 }
 
 function findVehicleByQrRaw(rawText) {
@@ -631,6 +712,44 @@ async function insertDispatchWithCreatedAtFallback(basePayload) {
     return result;
 }
 
+function setManagerStepTarget(targetEl) {
+    if (currentManagerStepTarget && currentManagerStepTarget.classList) {
+        currentManagerStepTarget.classList.remove('step-target');
+    }
+    currentManagerStepTarget = targetEl || null;
+    if (currentManagerStepTarget && currentManagerStepTarget.classList) {
+        currentManagerStepTarget.classList.add('step-target');
+    }
+}
+
+function updateManagerStepGuide() {
+    if (managerShiftActionInFlight) {
+        managerStepGuide.textContent = 'Procesando accion de turno. Espera confirmacion...';
+        setManagerStepTarget(null);
+        return;
+    }
+
+    if (!managerProfile || !managerAuthenticated) {
+        managerStepGuide.textContent = 'Paso 1/3: valida tu identidad de gestor para habilitar el control de turno.';
+        setManagerStepTarget(managerIdentity);
+        return;
+    }
+
+    if (!activeShift) {
+        if (!selectedItineraryGroup) {
+            managerStepGuide.textContent = 'Paso 2/3: selecciona un grupo de itinerarios (recomendado) para filtrar rutas.';
+            setManagerStepTarget(managerItineraryGroup);
+            return;
+        }
+        managerStepGuide.textContent = 'Paso 3/3: grupo listo. Pulsa "Iniciar turno" para habilitar despachos.';
+        setManagerStepTarget(startShiftBtn);
+        return;
+    }
+
+    managerStepGuide.textContent = 'Turno activo. Cuando finalices labores, pulsa "Finalizar turno".';
+    setManagerStepTarget(endShiftBtn);
+}
+
 function setSessionView(view) {
     const isManager = view === 'manager';
     const isDispatch = view === 'dispatch';
@@ -662,6 +781,16 @@ function setSessionView(view) {
     }
 }
 
+async function refreshDispatchDataOnSessionOpen() {
+    if (dispatchReloadInFlight) return;
+    dispatchReloadInFlight = true;
+    try {
+        await loadDispatches();
+    } finally {
+        dispatchReloadInFlight = false;
+    }
+}
+
 function setDispatchAvailability() {
     const hasProfile = !!managerProfile;
     const hasActiveShift = !!activeShift;
@@ -681,30 +810,35 @@ function setDispatchAvailability() {
     if (!hasProfile) {
         managerStatus.textContent = 'No se pudo cargar tu identidad de usuario.';
         showManagerAlertOnce('need_identity', 'No se pudo identificar el gestor logueado. Vuelve a iniciar sesion.');
+        updateManagerStepGuide();
         return;
     }
 
     if (!managerAuthenticated) {
         managerStatus.textContent = 'Debes iniciar sesion para habilitar operaciones.';
         showManagerAlertOnce('need_validate', 'Debes iniciar sesion para continuar.');
+        updateManagerStepGuide();
         return;
     }
 
     if (shiftSessionMismatch) {
         managerStatus.textContent = 'Turno activo detectado en otra sesion. Cierra sesion y vuelve a entrar para recuperar control.';
         showManagerAlertOnce('shift_session_mismatch', 'Este turno activo pertenece a otra sesion. Cierra sesion y vuelve a ingresar.');
+        updateManagerStepGuide();
         return;
     }
 
     if (!hasActiveShift) {
         managerStatus.textContent = 'No tienes turno activo. Debes iniciar turno para generar despachos.';
         showManagerAlertOnce('need_shift', 'No has iniciado labores. Debes iniciar turno para generar despachos.');
+        updateManagerStepGuide();
         return;
     }
 
     const start = formatDateTime(activeShift.start_time);
     managerStatus.textContent = `Turno activo desde ${start}. Recuerda finalizar turno al terminar.`;
     lastManagerAlertKey = '';
+    updateManagerStepGuide();
 }
 
 function setDispatchSubmitLoading(isLoading) {
@@ -898,53 +1032,6 @@ function generateSessionToken() {
         return window.crypto.randomUUID();
     }
     return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function getLoginLockToken() {
-    try {
-        return localStorage.getItem(LOCK_TOKEN_KEY) || '';
-    } catch (err) {
-        return '';
-    }
-}
-
-async function refreshLoginLock() {
-    const token = getLoginLockToken();
-    if (!currentUser?.id || !token) return;
-
-    await sb
-        .from(LOGIN_LOCK_TABLE)
-        .update({
-            active: true,
-            last_seen_at: new Date().toISOString()
-        })
-        .eq('user_id', currentUser.id)
-        .eq('session_token', token);
-}
-
-function startLoginLockHeartbeat() {
-    if (loginLockHeartbeatTimer) {
-        clearInterval(loginLockHeartbeatTimer);
-        loginLockHeartbeatTimer = null;
-    }
-
-    loginLockHeartbeatTimer = setInterval(() => {
-        refreshLoginLock().catch(() => {});
-    }, LOCK_HEARTBEAT_MS);
-}
-
-async function releaseLoginLock() {
-    const token = getLoginLockToken();
-    if (!currentUser?.id || !token) return;
-
-    await sb
-        .from(LOGIN_LOCK_TABLE)
-        .update({
-            active: false,
-            last_seen_at: new Date().toISOString()
-        })
-        .eq('user_id', currentUser.id)
-        .eq('session_token', token);
 }
 
 function clearShiftMaps() {
@@ -1240,6 +1327,80 @@ function validateDispatchForm() {
     return '';
 }
 
+function moveDispatchStepGuideBefore(targetEl) {
+    if (!dispatchForm || !dispatchStepGuide || !targetEl) return;
+    if (dispatchStepGuide.parentElement !== dispatchForm || dispatchStepGuide.nextElementSibling !== targetEl) {
+        dispatchForm.insertBefore(dispatchStepGuide, targetEl);
+    }
+}
+
+function setDispatchStepTarget(targetEl) {
+    if (currentDispatchStepTarget && currentDispatchStepTarget.classList) {
+        currentDispatchStepTarget.classList.remove('step-target');
+    }
+    currentDispatchStepTarget = targetEl || null;
+    if (currentDispatchStepTarget && currentDispatchStepTarget.classList) {
+        currentDispatchStepTarget.classList.add('step-target');
+    }
+}
+
+function updateDispatchStepGuide() {
+    const hasVehicle = !!String(vehicle.value || '').trim();
+    const hasDriver = !!String(driver.value || '').trim();
+    const hasTime = !!String(departureTime.value || '').trim();
+    const hasRoute = !!String(routeInput.value || '').trim();
+    const hasNotes = !!String(notes.value || '').trim();
+    const activeId = document.activeElement?.id || '';
+    const completed = [hasVehicle, hasDriver, hasTime, hasRoute].filter(Boolean).length;
+
+    if (!hasVehicle) {
+        moveDispatchStepGuideBefore(vehicleSearch);
+        setDispatchStepTarget(vehicle);
+        if (activeId === 'vehicleSearch') {
+            dispatchStepGuide.textContent = `Progreso ${completed}/4. Debes seleccionar un vehiculo (puedes buscar por placa, ID o interno).`;
+            return;
+        }
+        dispatchStepGuide.textContent = `Progreso ${completed}/4. Debes seleccionar un vehiculo para continuar.`;
+        return;
+    }
+
+    if (!hasDriver) {
+        moveDispatchStepGuideBefore(driverSearch);
+        setDispatchStepTarget(driver);
+        if (activeId === 'driverSearch') {
+            dispatchStepGuide.textContent = `Progreso ${completed}/4. Debes seleccionar el conductor (puedes buscar por nombre, cédula o ID).`;
+            return;
+        }
+        dispatchStepGuide.textContent = `Progreso ${completed}/4. Vehiculo seleccionado. Debes seleccionar el conductor.`;
+        return;
+    }
+
+    if (!hasTime) {
+        moveDispatchStepGuideBefore(departureTime);
+        setDispatchStepTarget(departureTime);
+        dispatchStepGuide.textContent = `Progreso ${completed}/4. Conductor seleccionado. Debes seleccionar la hora de salida.`;
+        return;
+    }
+
+    if (!hasRoute) {
+        moveDispatchStepGuideBefore(routeInput);
+        setDispatchStepTarget(routeInput);
+        dispatchStepGuide.textContent = `Progreso ${completed}/4. Hora definida. Debes seleccionar el itinerario.`;
+        return;
+    }
+
+    if (!hasNotes) {
+        moveDispatchStepGuideBefore(notes);
+        setDispatchStepTarget(notes);
+        dispatchStepGuide.textContent = `Progreso ${completed}/4. Itinerario seleccionado. Puedes agregar observacion opcional o realizar despacho.`;
+        return;
+    }
+
+    moveDispatchStepGuideBefore(submitDispatchBtn);
+    setDispatchStepTarget(submitDispatchBtn);
+    dispatchStepGuide.textContent = `Progreso ${completed}/4. Datos completos con observación: revisa y pulsa "Realizar Despacho".`;
+}
+
 function loadItineraries() {
     routeInput.innerHTML = '<option value="">Selecciona itinerario</option>';
 
@@ -1259,7 +1420,7 @@ function loadItineraries() {
 }
 
 function loadItineraryGroups() {
-    const current = managerItineraryGroup.value;
+    const current = selectedItineraryGroup || managerItineraryGroup.value;
     const groups = [...new Set(ITINERARIES.map((it) => String(it.grupo || '').trim()).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b));
 
@@ -1271,9 +1432,9 @@ function loadItineraryGroups() {
         managerItineraryGroup.appendChild(option);
     });
 
-    if (current && groups.includes(current)) {
-        managerItineraryGroup.value = current;
-    }
+    if (current && groups.includes(current)) managerItineraryGroup.value = current;
+    else managerItineraryGroup.value = '';
+    selectedItineraryGroup = managerItineraryGroup.value;
 }
 
 function loadVehicles(catalog) {
@@ -1315,6 +1476,7 @@ function loadVehicles(catalog) {
     }
 
     renderVehicleSelectedMeta();
+    updateDispatchStepGuide();
 }
 
 function renderVehicleSelectedMeta() {
@@ -1480,6 +1642,7 @@ function loadDrivers(catalog) {
     }
 
     renderDriverSelectedMeta();
+    updateDispatchStepGuide();
 }
 
 function renderDriverSelectedMeta() {
@@ -2102,9 +2265,8 @@ async function init() {
 
     currentUser = user;
     userEmail.textContent = user.email;
+    selectedItineraryGroup = getStoredItineraryGroup();
     renderNetworkBadge();
-    await refreshLoginLock();
-    startLoginLockHeartbeat();
     startLiveClock24();
 
     setAutomaticDate();
@@ -2112,6 +2274,7 @@ async function init() {
     loadItineraryGroups();
     loadItineraries();
     dispatchDateFilter.value = getCurrentDateKeyBogota();
+    salidasDateFilter.value = dispatchDateFilter.value;
     dispatchManagerFilter.value = '';
     dispatchItineraryFilter.value = '';
     try {
@@ -2134,6 +2297,7 @@ async function init() {
         renderManagerShiftHistoryPage();
         managerShiftHistory.innerHTML = '<div class="no-tasks">No se pudo cargar el historial de labores.</div>';
         submitDispatchBtn.disabled = true;
+        updateManagerStepGuide();
     }
     await loadVehiclesFromSheet();
     await loadDriversFromSheet();
@@ -2143,6 +2307,7 @@ async function init() {
     startExternalVcAutoRefresh();
     await loadDispatches();
     await syncPendingDispatchQueue(false);
+    updateDispatchStepGuide();
 }
 
 async function fetchAllDispatchesByDate(dateKey) {
@@ -2180,12 +2345,28 @@ async function fetchAllDispatchesByDate(dateKey) {
 async function loadDispatches() {
     const activeDate = getActiveDispatchDateKey();
     dispatchDateFilter.value = activeDate;
+    salidasDateFilter.value = activeDate;
 
     let data = [];
     try {
         const result = await fetchAllDispatchesByDate(activeDate);
         data = result.rows;
+        writeDispatchSnapshot(activeDate, data);
     } catch (err) {
+        const cached = readDispatchSnapshot(activeDate);
+        if (cached.length > 0) {
+            dispatchesCache = [...cached];
+            dispatchPage = 1;
+            renderItineraryFilter(dispatchesCache);
+            renderDispatchFilters(dispatchesCache);
+            renderMissingItineraryFilter(dispatchesCache);
+            renderDispatches();
+            renderMissingPassengers();
+            renderSalidas();
+            renderQuickRecentDispatches();
+            alert(`No se pudo consultar la base de datos. Mostrando respaldo local (${cached.length} despachos).`);
+            return;
+        }
         alert(err.message);
         return;
     }
@@ -2302,7 +2483,7 @@ function renderDispatches() {
             <p><b>Pasajeros:</b> ${escapeHtml(dispatch.passenger_count ?? '-')}</p>
             <p><b>Gestor:</b> ${escapeHtml(dispatch.manager)}</p>
             <p><b>Fecha salida:</b> ${escapeHtml(formatDate(dispatch.departure_time))}</p>
-            <p><b>Observaciones:</b> ${escapeHtml(dispatch.notes || '-')}</p>
+            <p><b>Observaciones:</b> ${escapeHtml(getVisibleDispatchNotes(dispatch.notes) || '-')}</p>
             <p><b>Cancelacion:</b> ${isCanceled ? escapeHtml(dispatch.cancellation_note || 'Sin motivo') : '-'}</p>
             <div class="dispatch-actions">
                 <button onclick="editPassengers(${dispatch.id}, ${dispatch.passenger_count})" ${(isCanceled || !canEdit) ? 'disabled' : ''} title="${canEdit ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Editar pasajeros</button>
@@ -2338,8 +2519,10 @@ function renderMissingPassengers() {
                     <p><b>Itinerario:</b> ${escapeHtml(row.route || '-')}</p>
                     <p><b>Vehiculo:</b> ${escapeHtml(row.vehicle || '-')}</p>
                     <p><b>Gestor:</b> ${escapeHtml(row.manager || '-')}</p>
+                    <p><b>Observaciones:</b> ${escapeHtml(getVisibleDispatchNotes(row.notes) || '-')}</p>
                     <div class="dispatch-actions">
                         <button onclick="editPassengers(${row.id}, ${row.passenger_count})" ${canCurrentManagerEditDispatch(row) ? '' : 'disabled'} title="${canCurrentManagerEditDispatch(row) ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Ingresar pasajeros</button>
+                        <button onclick="editDispatchNotes(${row.id})" ${canCurrentManagerEditDispatch(row) ? '' : 'disabled'} title="${canCurrentManagerEditDispatch(row) ? '' : 'Solo el gestor que registro este despacho puede editar observaciones.'}">Editar observacion</button>
                     </div>
                 </article>
             `).join('')}
@@ -2352,49 +2535,140 @@ function resetDispatchPaginationAndRender() {
     renderDispatches();
 }
 
-function renderSalidas() {
+function getFilteredOrderedSalidas() {
+    const selectedDate = String(salidasDateFilter.value || '').trim();
     const filtered = itineraryFilter.value
         ? dispatchesCache.filter((item) => String(item.route || '').trim() === itineraryFilter.value)
         : dispatchesCache;
+    const withDate = selectedDate
+        ? filtered.filter((item) => matchesDispatchDate(item, selectedDate))
+        : filtered;
 
-    if (filtered.length === 0) {
-        salidasList.innerHTML = '<div class="no-tasks">No hay salidas para ese itinerario.</div>';
-        return;
-    }
-
-    const orderedDispatches = [...filtered].sort((a, b) => {
+    return [...withDate].sort((a, b) => {
         const aTs = getDispatchSortTimestamp(a);
         const bTs = getDispatchSortTimestamp(b);
         if (aTs !== bTs) return bTs - aTs;
         return Number(b.id || 0) - Number(a.id || 0);
     });
+}
 
-    salidasList.innerHTML = '';
+function renderSalidas() {
+    const orderedDispatches = getFilteredOrderedSalidas();
+    if (orderedDispatches.length === 0) {
+        salidasList.innerHTML = '<div class="no-tasks">No hay salidas para ese itinerario.</div>';
+        return;
+    }
 
-    orderedDispatches.forEach((dispatch, index) => {
-        const isCanceled = !!dispatch.is_canceled;
-        const row = document.createElement('article');
-        row.className = `salida-item ${isCanceled ? 'canceled' : ''}`;
+    salidasList.innerHTML = `
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Observaciones</th>
+                        <th>Fecha</th>
+                        <th>Vehiculo</th>
+                        <th>Hora</th>
+                        <th>Ruta</th>
+                        <th>Pasajeros</th>
+                        <th>Conductor</th>
+                        <th>Gestor</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${orderedDispatches.map((dispatch, index) => {
+                        const isCanceled = !!dispatch.is_canceled;
+                        const hasMissingPassengers = !Number.isInteger(Number(dispatch.passenger_count)) || Number(dispatch.passenger_count) <= 0;
+                        const canEdit = canCurrentManagerEditDispatch(dispatch);
+                        const disabled = (isCanceled || !canEdit) ? 'disabled' : '';
+                        const title = !canEdit ? 'Solo el gestor que registro este despacho puede editar observaciones.' : '';
+                        const rowClass = [
+                            isCanceled ? 'dispatch-table-row-canceled' : '',
+                            hasMissingPassengers ? 'dispatch-table-row-missing-passengers' : ''
+                        ].filter(Boolean).join(' ');
+                        return `
+                            <tr class="${rowClass}">
+                                <td>${escapeHtml(getVisibleDispatchNotes(dispatch.notes) || '-')}</td>
+                                <td>${escapeHtml(formatDate(dispatch.departure_time || dispatch.created_at))}</td>
+                                <td>${escapeHtml(dispatch.vehicle || '-')}</td>
+                                <td>${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}</td>
+                                <td>${escapeHtml(dispatch.route || '-')}</td>
+                                <td>${escapeHtml(dispatch.passenger_count ?? '-')}</td>
+                                <td>${escapeHtml(dispatch.driver || '-')}</td>
+                                <td>${escapeHtml(dispatch.manager || '-')}</td>
+                                <td>
+                                    <button onclick="editDispatchNotes(${dispatch.id})" ${disabled} title="${escapeHtml(title)}">Editar observacion</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
 
-        row.innerHTML = `
-            <div class="salida-order">#${index + 1}</div>
-            <div class="salida-date">${escapeHtml(formatDate(dispatch.departure_time || dispatch.created_at))}</div>
-            <div class="salida-time">${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}</div>
-            <div class="salida-route">${escapeHtml(dispatch.route || '-')}</div>
-            <div class="salida-vehicle">${escapeHtml(dispatch.vehicle || '-')}</div>
-            <div class="salida-driver">${escapeHtml(dispatch.driver || '-')}</div>
-        `;
+function toCsvCell(value) {
+    const text = String(value ?? '');
+    return `"${text.replace(/"/g, '""')}"`;
+}
 
-        salidasList.appendChild(row);
-    });
+function exportSalidasToExcel() {
+    const rows = getFilteredOrderedSalidas();
+    if (rows.length === 0) {
+        alert('No hay salidas para exportar con los filtros actuales.');
+        return;
+    }
+
+    const header = ['Estado', 'Fecha', 'Hora', 'Itinerario', 'Vehiculo', 'Conductor', 'Gestor', 'Observaciones'];
+    const csvRows = [
+        header.map(toCsvCell).join(','),
+        ...rows.map((dispatch) => {
+            const isCanceled = !!dispatch.is_canceled;
+            return [
+                isCanceled ? 'Cancelado' : 'Activo',
+                formatDate(dispatch.departure_time || dispatch.created_at),
+                formatTime24(dispatch.hora_salida || dispatch.departure_time),
+                dispatch.route || '-',
+                dispatch.vehicle || '-',
+                dispatch.driver || '-',
+                dispatch.manager || '-',
+                getVisibleDispatchNotes(dispatch.notes) || '-'
+            ].map(toCsvCell).join(',');
+        })
+    ];
+
+    const csvContent = `\uFEFF${csvRows.join('\r\n')}`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const dateKey = getCurrentDateKeyBogota();
+    const filename = `planilla_salidas_${dateKey}.csv`;
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
 driver.addEventListener('change', renderDriverInfo);
 vehicle.addEventListener('change', handleVehicleChange);
+vehicle.addEventListener('change', updateDispatchStepGuide);
+driver.addEventListener('change', updateDispatchStepGuide);
+departureTime.addEventListener('change', updateDispatchStepGuide);
+routeInput.addEventListener('change', updateDispatchStepGuide);
+notes.addEventListener('input', updateDispatchStepGuide);
 vehicleSearch.addEventListener('input', () => loadVehicles(vehiclesCatalog));
 driverSearch.addEventListener('input', () => {
     loadDrivers(driversCatalog);
     renderDriverInfo();
+    updateDispatchStepGuide();
+});
+['vehicleSearch', 'vehicle', 'driverSearch', 'driver', 'departureTime', 'route', 'notes'].forEach((fieldId) => {
+    const el = document.getElementById(fieldId);
+    if (el) el.addEventListener('focus', updateDispatchStepGuide);
 });
 vehicle.addEventListener('change', () => {
     if (vehicle.value) driver.focus();
@@ -2416,20 +2690,34 @@ qrScannerModal.addEventListener('click', (e) => {
 });
 managerItineraryGroup.addEventListener('change', () => {
     selectedItineraryGroup = managerItineraryGroup.value;
+    setStoredItineraryGroup(selectedItineraryGroup);
     loadItineraries();
     if (routeInput.value) {
         const exists = Array.from(routeInput.options).some((opt) => opt.value === routeInput.value);
         if (!exists) routeInput.value = '';
     }
     renderRouteSelectedMeta();
+    updateDispatchStepGuide();
+    updateManagerStepGuide();
 });
 itineraryFilter.addEventListener('change', renderSalidas);
+salidasDateFilter.addEventListener('change', async () => {
+    dispatchDateFilter.value = String(salidasDateFilter.value || '').trim() || getCurrentDateKeyBogota();
+    await loadDispatches();
+});
+exportSalidasBtn.addEventListener('click', exportSalidasToExcel);
 dispatchDateFilter.addEventListener('change', () => { loadDispatches(); });
 dispatchManagerFilter.addEventListener('input', resetDispatchPaginationAndRender);
 dispatchItineraryFilter.addEventListener('change', resetDispatchPaginationAndRender);
 sessionManagerBtn.addEventListener('click', () => setSessionView('manager'));
-sessionDispatchBtn.addEventListener('click', () => setSessionView('dispatch'));
-sessionSalidasBtn.addEventListener('click', () => setSessionView('salidas'));
+sessionDispatchBtn.addEventListener('click', async () => {
+    setSessionView('dispatch');
+    await refreshDispatchDataOnSessionOpen();
+});
+sessionSalidasBtn.addEventListener('click', async () => {
+    setSessionView('salidas');
+    await refreshDispatchDataOnSessionOpen();
+});
 sessionMissingBtn.addEventListener('click', () => setSessionView('missing'));
 sessionFleetBtn.addEventListener('click', () => setSessionView('fleet'));
 sessionSicovBtn.addEventListener('click', () => setSessionView('sicov'));
@@ -2474,10 +2762,6 @@ window.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('beforeunload', () => {
     stopQrScanner();
-    if (loginLockHeartbeatTimer) {
-        clearInterval(loginLockHeartbeatTimer);
-        loginLockHeartbeatTimer = null;
-    }
     if (externalVcAutoRefreshTimer) {
         clearInterval(externalVcAutoRefreshTimer);
         externalVcAutoRefreshTimer = null;
@@ -2601,6 +2885,7 @@ dispatchForm.addEventListener('submit', async (e) => {
         loadVehicles(vehiclesCatalog);
         loadDrivers(driversCatalog);
     loadItineraries();
+    updateDispatchStepGuide();
     dispatchEntryMethod = 'manual';
     setDispatchAvailability();
     driverInfo.textContent = `${driversCatalog.length} conductores disponibles.`;
@@ -2641,7 +2926,10 @@ window.editPassengers = async function (id, currentPassengers) {
         return;
     }
 
-    const value = prompt('Nueva cantidad de pasajeros:', String(currentPassengers ?? ''));
+    const value = prompt(
+        'Ingresa la cantidad total de pasajeros para este despacho (numero entero mayor a 0):',
+        String(currentPassengers ?? '')
+    );
     if (value === null) return;
 
     const parsed = Number(value);
@@ -2670,6 +2958,61 @@ window.editPassengers = async function (id, currentPassengers) {
     await loadDispatches();
 };
 
+window.editDispatchNotes = async function (id) {
+    const { data: dispatchRow, error: dispatchError } = await sb
+        .from('dispatches')
+        .select('id, manager, notes')
+        .eq('id', id)
+        .eq('user_id', currentUser.id)
+        .limit(1)
+        .maybeSingle();
+
+    if (dispatchError) {
+        alert(dispatchError.message);
+        return;
+    }
+
+    if (!dispatchRow) {
+        alert('No se encontro el despacho.');
+        return;
+    }
+
+    if (!canCurrentManagerEditDispatch(dispatchRow)) {
+        alert('Solo el gestor que registro este despacho puede editar observaciones.');
+        return;
+    }
+
+    const split = splitDispatchMethodNotes(dispatchRow.notes || '');
+    const promptLabel = split.prefix
+        ? `Observacion adicional (se mantiene fijo: "${split.prefix}")`
+        : 'Nueva observacion del despacho:';
+    const value = prompt(promptLabel, split.extra);
+    if (value === null) return;
+
+    const editedExtra = String(value).trim();
+    const nextNotes = split.prefix
+        ? (editedExtra ? `${split.prefix}. ${editedExtra}` : split.prefix)
+        : editedExtra;
+    const confirmUpdate = await openDispatchConfirmModal(
+        `¿Confirmas actualizar observaciones${nextNotes ? '' : ' (quedara vacio)'}?`,
+        'Si, guardar'
+    );
+    if (!confirmUpdate) return;
+
+    const { error } = await sb
+        .from('dispatches')
+        .update({ notes: nextNotes })
+        .eq('id', id)
+        .eq('user_id', currentUser.id);
+
+    if (error) {
+        alert(error.message);
+        return;
+    }
+
+    await loadDispatches();
+};
+
 window.logout = async function () {
     try {
         await loadActiveShift();
@@ -2687,17 +3030,14 @@ window.logout = async function () {
         return;
     }
 
-    try {
-        await releaseLoginLock();
-    } catch (err) {
-        // Si falla el release igual cerramos sesion local.
-    }
-
     await sb.auth.signOut();
     location.href = 'index.html';
 };
 
 init();
+
+
+
 
 
 
