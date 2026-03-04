@@ -37,8 +37,10 @@
             <button id="sessionManagerBtn" class="session-tab" type="button">Inicio de labores gestores</button>
             <button id="sessionDispatchBtn" class="session-tab active" type="button">Gestion de despachos</button>
             <button id="sessionSalidasBtn" class="session-tab" type="button">planilla de salidas vehiculos</button>
+            <button id="sessionControlAuditBtn" class="session-tab" type="button">Auditoria control</button>
             <button id="sessionMissingBtn" class="session-tab" type="button">Reporte de viajes sin pasajeros</button>
             <button id="sessionFleetBtn" class="session-tab" type="button">Parque automotor ERP</button>
+            <button id="sessionDailyReportBtn" class="session-tab" type="button">Informe diario flota</button>
             <button id="sessionSicovBtn" class="session-tab" type="button">Preoperacionales SICOV</button>
             <button id="sessionExternalVcBtn" class="session-tab" type="button">Registros biometricos vehiculos</button>
             <button id="sessionUpdatesBtn" class="session-tab" type="button">Actualizaciones de datos</button>
@@ -155,9 +157,40 @@
                     </select>
                 </div>
                 <div class="dispatch-filters">
+                    <input type="text" id="salidasSearchFilter" placeholder="Buscar por vehiculo o conductor">
+                </div>
+                <div class="dispatch-filters">
                     <button id="exportSalidasBtn" type="button" class="btn-secondary">Descargar planilla (Excel)</button>
                 </div>
+                <p id="salidasPassengerTotal" class="driver-info">Total pasajeros filtrados: 0</p>
                 <div id="salidasList" class="salidas-list"></div>
+            </section>
+        </section>
+
+        <section id="controlAuditSession" class="session-view">
+            <section class="card">
+                <h2>Auditoria de viajes (Control)</h2>
+                <p class="user-guide">Guia: aqui puedes registrar comentarios de auditoria. Cada comentario se agrega al historial en observaciones sin borrar lo anterior.</p>
+                <div class="dispatch-filters">
+                    <input type="date" id="controlAuditDateFilter">
+                    <select id="controlAuditItineraryFilter">
+                        <option value="">Todos los itinerarios</option>
+                    </select>
+                    <input type="text" id="controlAuditSearchFilter" placeholder="Buscar por vehiculo o conductor">
+                    <button id="refreshControlAuditBtn" type="button" class="btn-secondary">Actualizar</button>
+                </div>
+                <div id="controlAuditList" class="fleet-list"></div>
+            </section>
+        </section>
+
+        <section id="dailyReportSession" class="session-view">
+            <section class="card">
+                <h2>Informe diario de flota</h2>
+                <p class="user-guide">Guia: selecciona la fecha para ver cuántos vehículos están laborando y cuántos no.</p>
+                <div class="dispatch-filters">
+                    <input type="date" id="dailyReportDateFilter">
+                </div>
+                <div id="dailyLaborReport" class="daily-labor-report"></div>
             </section>
         </section>
 
@@ -244,6 +277,7 @@
 <script src="dashboard.js"></script>
 </body>
 </html>
+
 
 
 
