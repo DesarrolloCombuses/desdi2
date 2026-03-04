@@ -75,6 +75,7 @@ let suppressManagerAlerts = false;
 let shiftSessionMismatch = false;
 const SHIFT_TOKEN_STORAGE_PREFIX = 'manager_shift_token:';
 const ITINERARY_GROUP_SESSION_PREFIX = 'manager_itinerary_group:';
+const CONTROL_AUDIT_PRESET_OPTIONS = ['Apoyo Pista', 'Taller'];
 
 const userEmail = document.getElementById('userEmail');
 const dispatchForm = document.getElementById('dispatchForm');
@@ -117,24 +118,37 @@ const missingPassengerList = document.getElementById('missingPassengerList');
 const missingItineraryFilter = document.getElementById('missingItineraryFilter');
 const salidasList = document.getElementById('salidasList');
 const salidasDateFilter = document.getElementById('salidasDateFilter');
+const salidasSearchFilter = document.getElementById('salidasSearchFilter');
+const controlAuditDateFilter = document.getElementById('controlAuditDateFilter');
+const controlAuditItineraryFilter = document.getElementById('controlAuditItineraryFilter');
+const controlAuditSearchFilter = document.getElementById('controlAuditSearchFilter');
+const refreshControlAuditBtn = document.getElementById('refreshControlAuditBtn');
+const controlAuditList = document.getElementById('controlAuditList');
+const dailyReportDateFilter = document.getElementById('dailyReportDateFilter');
 const itineraryFilter = document.getElementById('itineraryFilter');
 const exportSalidasBtn = document.getElementById('exportSalidasBtn');
+const salidasPassengerTotal = document.getElementById('salidasPassengerTotal');
+const dailyLaborReport = document.getElementById('dailyLaborReport');
 const dispatchDateFilter = document.getElementById('dispatchDateFilter');
 const dispatchManagerFilter = document.getElementById('dispatchManagerFilter');
 const dispatchItineraryFilter = document.getElementById('dispatchItineraryFilter');
 const sessionManagerBtn = document.getElementById('sessionManagerBtn');
 const sessionDispatchBtn = document.getElementById('sessionDispatchBtn');
 const sessionSalidasBtn = document.getElementById('sessionSalidasBtn');
+const sessionControlAuditBtn = document.getElementById('sessionControlAuditBtn');
 const sessionMissingBtn = document.getElementById('sessionMissingBtn');
 const sessionFleetBtn = document.getElementById('sessionFleetBtn');
+const sessionDailyReportBtn = document.getElementById('sessionDailyReportBtn');
 const sessionSicovBtn = document.getElementById('sessionSicovBtn');
 const sessionExternalVcBtn = document.getElementById('sessionExternalVcBtn');
 const sessionUpdatesBtn = document.getElementById('sessionUpdatesBtn');
 const managerSession = document.getElementById('managerSession');
 const dispatchSession = document.getElementById('dispatchSession');
 const salidasSession = document.getElementById('salidasSession');
+const controlAuditSession = document.getElementById('controlAuditSession');
 const missingSession = document.getElementById('missingSession');
 const fleetSession = document.getElementById('fleetSession');
+const dailyReportSession = document.getElementById('dailyReportSession');
 const sicovSession = document.getElementById('sicovSession');
 const externalVcSession = document.getElementById('externalVcSession');
 const updatesSession = document.getElementById('updatesSession');
@@ -184,6 +198,19 @@ let liveClockTimer = null;
 let dispatchReloadInFlight = false;
 let currentDispatchStepTarget = null;
 let currentManagerStepTarget = null;
+let activeHourPickerCleanup = null;
+let isControlOperatorUser = false;
+let currentSessionView = 'dispatch';
+const CSV_FETCH_RETRY_ATTEMPTS = 3;
+const CSV_FETCH_RETRY_DELAY_MS = 1200;
+const CSV_FETCH_TIMEOUT_MS = 12000;
+const csvRetryTimers = {
+    vehicles: null,
+    drivers: null,
+    fleet: null,
+    sicov: null,
+    externalVc: null
+};
 
 function getDispatchQueueStorageKey() {
     return `${DISPATCH_QUEUE_KEY_PREFIX}${currentUser?.id || 'anon'}`;
@@ -240,6 +267,54 @@ function setStoredItineraryGroup(value) {
     }
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearCsvRetryTimer(kind) {
+    if (!csvRetryTimers[kind]) return;
+    clearTimeout(csvRetryTimers[kind]);
+    csvRetryTimers[kind] = null;
+}
+
+function scheduleCsvAutoRetry(kind, loaderFn, delayMs = 15000) {
+    if (csvRetryTimers[kind]) return;
+    csvRetryTimers[kind] = setTimeout(async () => {
+        csvRetryTimers[kind] = null;
+        if (!hasInternet) return;
+        try {
+            await loaderFn();
+        } catch (err) {
+            // Ignorado: se reintentara en siguiente ciclo/evento.
+        }
+    }, delayMs);
+}
+
+async function fetchCsvTextWithRetry(url, label) {
+    let lastErr = null;
+    for (let attempt = 1; attempt <= CSV_FETCH_RETRY_ATTEMPTS; attempt += 1) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), CSV_FETCH_TIMEOUT_MS);
+        try {
+            const response = await fetch(buildNoCacheUrl(url), {
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            if (!response.ok) throw new Error(`No se pudo obtener ${label}.`);
+            const text = await response.text();
+            clearTimeout(timeoutId);
+            return text;
+        } catch (err) {
+            clearTimeout(timeoutId);
+            lastErr = err;
+            if (attempt < CSV_FETCH_RETRY_ATTEMPTS) {
+                await sleep(CSV_FETCH_RETRY_DELAY_MS * attempt);
+            }
+        }
+    }
+    throw lastErr || new Error(`No se pudo obtener ${label}.`);
+}
+
 function readPendingDispatchQueue() {
     try {
         const raw = localStorage.getItem(getDispatchQueueStorageKey()) || '[]';
@@ -273,9 +348,9 @@ if (
     !userEmail || !dispatchForm || !vehicle || !vehicleSearch || !vehicleInfo || !quickRecentDispatchesList || !vehicleSelectedMeta || !vehicleDocsPanel || !departureDate || !departureTime || !liveClock24 || !routeInput || !routeSelectedMeta ||
     !driver || !driverSearch || !driverSelectedMeta || !manager || !managerIdentity || !managerItineraryGroup || !startShiftBtn || !endShiftBtn || !managerStatus || !managerStepGuide || !managerShiftHistory || !shiftPrevBtn || !shiftNextBtn || !shiftPageInfo ||
     !dispatchFormCard || !dispatchListCard || !dispatchLockedNotice ||
-    !notes || !dispatchStepGuide || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !salidasDateFilter || !itineraryFilter || !exportSalidasBtn ||
+    !notes || !dispatchStepGuide || !driverInfo || !dispatchesList || !passengerAlert || !dispatchPrevBtn || !dispatchNextBtn || !dispatchPageInfo || !missingPassengerList || !missingItineraryFilter || !salidasList || !salidasDateFilter || !salidasSearchFilter || !controlAuditDateFilter || !controlAuditItineraryFilter || !controlAuditSearchFilter || !refreshControlAuditBtn || !controlAuditList || !dailyReportDateFilter || !itineraryFilter || !exportSalidasBtn || !salidasPassengerTotal || !dailyLaborReport ||
     !dispatchDateFilter || !dispatchManagerFilter || !dispatchItineraryFilter ||
-    !sessionManagerBtn || !sessionDispatchBtn || !sessionSalidasBtn || !sessionMissingBtn || !sessionFleetBtn || !sessionSicovBtn || !sessionExternalVcBtn || !sessionUpdatesBtn || !managerSession || !dispatchSession || !salidasSession || !missingSession || !fleetSession || !sicovSession || !externalVcSession || !updatesSession || !fleetStatus || !fleetList || !sicovStatus || !sicovList || !sicovFilter || !externalVcStatus || !externalVcList || !externalVcFilter ||
+    !sessionManagerBtn || !sessionDispatchBtn || !sessionSalidasBtn || !sessionControlAuditBtn || !sessionMissingBtn || !sessionFleetBtn || !sessionDailyReportBtn || !sessionSicovBtn || !sessionExternalVcBtn || !sessionUpdatesBtn || !managerSession || !dispatchSession || !salidasSession || !controlAuditSession || !missingSession || !fleetSession || !dailyReportSession || !sicovSession || !externalVcSession || !updatesSession || !fleetStatus || !fleetList || !sicovStatus || !sicovList || !sicovFilter || !externalVcStatus || !externalVcList || !externalVcFilter ||
     !refreshAllCsvBtn || !refreshVehiclesCsvBtn || !refreshDriversCsvBtn || !refreshFleetCsvBtn || !refreshSicovCsvBtn || !refreshExternalVcBtn ||
     !dispatchConfirmModal || !dispatchConfirmText || !dispatchConfirmCancel || !dispatchConfirmOk || !scanVehicleQrBtn || !qrScannerModal || !qrScannerVideo || !qrScannerStatus || !qrScannerClose || !submitDispatchBtn ||
     !networkStatus || !dispatchLockedText
@@ -412,6 +487,23 @@ function getVisibleDispatchNotes(fullNotes) {
     const split = splitDispatchMethodNotes(fullNotes);
     if (split.prefix) return split.extra || '';
     return String(fullNotes || '').trim();
+}
+
+function renderDispatchNotesHtml(fullNotes) {
+    const visible = getVisibleDispatchNotes(fullNotes);
+    if (!visible) return '<span class="notes-line">-</span>';
+
+    const lines = String(visible)
+        .split(/\r?\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    if (lines.length === 0) return '<span class="notes-line">-</span>';
+
+    return lines.map((line) => {
+        const safe = escapeHtml(line);
+        const isAudit = /\bcomento\s*:/i.test(line);
+        return `<span class="notes-line ${isAudit ? 'notes-audit' : 'notes-user'}">${safe}</span>`;
+    }).join('');
 }
 
 function findVehicleByQrRaw(rawText) {
@@ -750,10 +842,113 @@ function updateManagerStepGuide() {
     setManagerStepTarget(endShiftBtn);
 }
 
+function detectControlOperatorUser() {
+    const metadata = currentUser?.user_metadata || {};
+    const bag = normalizeText([
+        currentUser?.email || '',
+        metadata.username || '',
+        metadata.display_name || '',
+        metadata.full_name || '',
+        metadata.name || ''
+    ].join(' '));
+    return bag.includes('control');
+}
+
+function applyControlAuditVisibility() {
+    const visible = !!isControlOperatorUser;
+    sessionControlAuditBtn.style.display = visible ? '' : 'none';
+    controlAuditSession.style.display = visible ? '' : 'none';
+    if (!visible && currentSessionView === 'control-audit') {
+        setSessionView('dispatch');
+    }
+}
+
+function renderControlAuditItineraryFilter() {
+    const current = controlAuditItineraryFilter.value;
+    const routes = [...new Set(dispatchesCache.map((item) => String(item.route || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    controlAuditItineraryFilter.innerHTML = '<option value="">Todos los itinerarios</option>';
+    routes.forEach((name) => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        controlAuditItineraryFilter.appendChild(option);
+    });
+    if (current && routes.includes(current)) controlAuditItineraryFilter.value = current;
+}
+
+function renderControlAuditList() {
+    if (!isControlOperatorUser) return;
+
+    const dateKey = String(controlAuditDateFilter.value || dispatchDateFilter.value || getCurrentDateKeyBogota()).trim();
+    const itinerary = String(controlAuditItineraryFilter.value || '').trim();
+    const search = normalizeText(controlAuditSearchFilter.value);
+    const rows = dispatchesCache
+        .filter((row) => matchesDispatchDate(row, dateKey))
+        .filter((row) => itinerary ? String(row.route || '').trim() === itinerary : true)
+        .filter((row) => {
+            if (!search) return true;
+            const bag = normalizeText(`${row.vehicle || ''} ${row.driver || ''}`);
+            return bag.includes(search);
+        })
+        .sort((a, b) => getDispatchSortTimestamp(b) - getDispatchSortTimestamp(a));
+
+    if (rows.length === 0) {
+        controlAuditList.innerHTML = '<div class="no-tasks">No hay viajes para auditar con esos filtros.</div>';
+        return;
+    }
+
+    controlAuditList.innerHTML = `
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Hora</th>
+                        <th>Vehiculo</th>
+                        <th>Ruta</th>
+                        <th>Conductor</th>
+                        <th>Gestor</th>
+                        <th>Observaciones actuales</th>
+                        <th>Comentario control</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map((row) => `
+                        <tr>
+                            <td>${escapeHtml(formatDate(row.departure_time || row.created_at))}</td>
+                            <td>${escapeHtml(formatTime24(row.hora_salida || row.departure_time))}</td>
+                            <td>${escapeHtml(row.vehicle || '-')}</td>
+                            <td>${escapeHtml(row.route || '-')}</td>
+                            <td>${escapeHtml(row.driver || '-')}</td>
+                            <td>${escapeHtml(row.manager || '-')}</td>
+                            <td class="notes-cell"><span class="notes-text">${renderDispatchNotesHtml(row.notes)}</span></td>
+                            <td>
+                                <div class="audit-comment-box">
+                                    <select id="auditPreset-${row.id}" class="audit-preset-select">
+                                        <option value="">Selecciona item</option>
+                                        ${CONTROL_AUDIT_PRESET_OPTIONS.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('')}
+                                    </select>
+                                    <input id="auditComment-${row.id}" type="text" placeholder="Texto adicional (opcional)">
+                                </div>
+                            </td>
+                            <td><button id="auditSaveBtn-${row.id}" onclick="saveControlAuditComment(${row.id})" class="btn-secondary">Agregar comentario</button></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 function setSessionView(view) {
+    currentSessionView = view;
     const isManager = view === 'manager';
     const isDispatch = view === 'dispatch';
     const isSalidas = view === 'salidas';
+    const isControlAudit = view === 'control-audit';
+    const isDailyReport = view === 'daily-report';
     const isMissing = view === 'missing';
     const isFleet = view === 'fleet';
     const isSicov = view === 'sicov';
@@ -762,6 +957,8 @@ function setSessionView(view) {
     managerSession.classList.toggle('active', isManager);
     dispatchSession.classList.toggle('active', isDispatch);
     salidasSession.classList.toggle('active', isSalidas);
+    controlAuditSession.classList.toggle('active', isControlAudit);
+    dailyReportSession.classList.toggle('active', isDailyReport);
     missingSession.classList.toggle('active', isMissing);
     fleetSession.classList.toggle('active', isFleet);
     sicovSession.classList.toggle('active', isSicov);
@@ -770,6 +967,8 @@ function setSessionView(view) {
     sessionManagerBtn.classList.toggle('active', isManager);
     sessionDispatchBtn.classList.toggle('active', isDispatch);
     sessionSalidasBtn.classList.toggle('active', isSalidas);
+    sessionControlAuditBtn.classList.toggle('active', isControlAudit);
+    sessionDailyReportBtn.classList.toggle('active', isDailyReport);
     sessionMissingBtn.classList.toggle('active', isMissing);
     sessionFleetBtn.classList.toggle('active', isFleet);
     sessionSicovBtn.classList.toggle('active', isSicov);
@@ -778,6 +977,9 @@ function setSessionView(view) {
 
     if (isExternalVc) {
         loadExternalVehiculoConductores();
+    }
+    if (isControlAudit) {
+        renderControlAuditList();
     }
 }
 
@@ -794,7 +996,7 @@ async function refreshDispatchDataOnSessionOpen() {
 function setDispatchAvailability() {
     const hasProfile = !!managerProfile;
     const hasActiveShift = !!activeShift;
-    const enabled = hasProfile && hasActiveShift && managerAuthenticated && !shiftSessionMismatch;
+    const enabled = hasProfile && hasActiveShift && managerAuthenticated;
 
     const shouldLockByInternet = false;
     const shouldLockByShift = !hasActiveShift;
@@ -817,13 +1019,6 @@ function setDispatchAvailability() {
     if (!managerAuthenticated) {
         managerStatus.textContent = 'Debes iniciar sesion para habilitar operaciones.';
         showManagerAlertOnce('need_validate', 'Debes iniciar sesion para continuar.');
-        updateManagerStepGuide();
-        return;
-    }
-
-    if (shiftSessionMismatch) {
-        managerStatus.textContent = 'Turno activo detectado en otra sesion. Cierra sesion y vuelve a entrar para recuperar control.';
-        showManagerAlertOnce('shift_session_mismatch', 'Este turno activo pertenece a otra sesion. Cierra sesion y vuelve a ingresar.');
         updateManagerStepGuide();
         return;
     }
@@ -927,6 +1122,19 @@ async function syncPendingDispatchQueue(showAlert = false) {
         if (!payload) continue;
 
         try {
+            let skipExternalForItem = !!item?.skipExternalByWindow;
+            if (!skipExternalForItem) {
+                try {
+                    const validation = await checkVehicleDispatchWindow(payload.vehicle, payload.departure_time, payload.hora_salida);
+                    if (validation.shouldConfirm) {
+                        // En sincronizacion automatica evitamos reenvio externo de despachos cercanos.
+                        skipExternalForItem = true;
+                    }
+                } catch (validationErr) {
+                    // Si falla validacion no bloqueamos la sincronizacion.
+                }
+            }
+
             const { error } = await insertDispatchWithCreatedAtFallback(payload);
             if (error) {
                 remaining.push(item);
@@ -934,7 +1142,7 @@ async function syncPendingDispatchQueue(showAlert = false) {
             }
 
             const appPayload = item?.appsScriptPayload || null;
-            if (appPayload && appPayload.mId && appPayload.itinerary && appPayload.drvId) {
+            if (!skipExternalForItem && appPayload && appPayload.mId && appPayload.itinerary && appPayload.drvId) {
                 try {
                     await sendDispatchToAppsScript(appPayload);
                 } catch (err) {
@@ -1135,7 +1343,9 @@ async function loadActiveShift() {
     }
 
     if (storedToken !== shiftToken) {
-        shiftSessionMismatch = true;
+        // Modo multi-sesion: adoptamos token actual para no bloquear despacho.
+        setStoredShiftToken(shiftToken);
+        shiftSessionMismatch = false;
     }
 }
 
@@ -1611,10 +1821,7 @@ function loadDrivers(catalog) {
     const query = normalizeText(driverSearch.value);
     driver.innerHTML = '<option value="">Selecciona conductor</option>';
 
-    const enabledCatalog = catalog.filter((item) => {
-        const statusText = normalizeText(item.status);
-        return statusText !== 'disabled' && statusText !== 'inactivo' && statusText !== 'desvinculado';
-    });
+    const enabledCatalog = catalog.filter((item) => normalizeText(item.status) === 'enabled');
 
     const activeFirst = [
         ...enabledCatalog.filter((item) => isActiveDriverStatus(item.status)),
@@ -1765,22 +1972,15 @@ function getSelectedVehicleNumber() {
 
 async function findExternalDriverByVehicle(vehicleNumber) {
     if (!sbExternal || !Number.isInteger(vehicleNumber)) return null;
-
-    const cached = externalVcRows
-        .filter((row) => Number(String(row.vehiculo || '').trim()) === vehicleNumber)
-        .sort((a, b) => {
-            const aTs = new Date(a.created_at || 0).getTime();
-            const bTs = new Date(b.created_at || 0).getTime();
-            return bTs - aTs;
-        })[0] || null;
-
-    if (cached) {
-        // Refresco puntual en segundo plano para este vehiculo sin bloquear el flujo.
-        refreshExternalVehiculoConductoresByVehicle(vehicleNumber).catch(() => {});
-        return cached;
-    }
-
-    return refreshExternalVehiculoConductoresByVehicle(vehicleNumber);
+    const tableVehiculoConductores = String(EXT_VEHICULO_CONDUCTORES_TABLE || 'vehiculo_conductores').trim();
+    const { data, error } = await sbExternal
+        .from(tableVehiculoConductores)
+        .select('vehiculo, cedula, nombre, email, created_at, fecha_ingreso, hora_ingreso')
+        .eq('vehiculo', vehicleNumber)
+        .order('created_at', { ascending: false })
+        .limit(1);
+    if (error) throw error;
+    return data && data[0] ? data[0] : null;
 }
 
 function mergeExternalVehiculoConductoresRows(rows) {
@@ -1867,14 +2067,12 @@ async function autoFillDriverFromExternalByVehicle() {
     if (!sbExternal) return;
     const vehicleNumber = getSelectedVehicleNumber();
     if (!Number.isInteger(vehicleNumber)) return;
-    const hasDriverSelected = String(driver.value || '').trim() !== '';
 
     try {
         const externalRow = await findExternalDriverByVehicle(vehicleNumber);
         if (requestId !== vehicleDriverLookupSeq) return;
 
         if (externalRow) {
-            if (hasDriverSelected) return;
             const matched = selectDriverFromCsvByExternalRow(externalRow);
             if (matched) {
                 alert(`Conductor autocompletado desde biometrico para vehiculo ${vehicleNumber}.`);
@@ -1884,8 +2082,6 @@ async function autoFillDriverFromExternalByVehicle() {
             alert(`Se encontro conductor en biometrico (${externalRow.nombre}), pero no esta en la lista de conductores.`);
             return;
         }
-
-        if (hasDriverSelected) return;
 
         const goManual = confirm(
             `No se encontro conductor en biometrico para el vehiculo ${vehicleNumber}. ¿Deseas registrarlo manualmente desde la lista de conductores?`
@@ -1902,10 +2098,7 @@ async function autoFillDriverFromExternalByVehicle() {
 
 async function loadVehiclesFromSheet() {
     try {
-        const response = await fetch(buildNoCacheUrl(VEHICLES_CSV_URL), { cache: 'no-store' });
-        if (!response.ok) throw new Error('No se pudo obtener vehiculos.');
-
-        const csvText = await response.text();
+        const csvText = await fetchCsvTextWithRetry(VEHICLES_CSV_URL, 'vehiculos');
         const rows = parseCSV(csvText);
         if (rows.length < 2) throw new Error('No hay datos de vehiculos.');
 
@@ -1931,19 +2124,23 @@ async function loadVehiclesFromSheet() {
         renderVehicleSelectedMeta();
         renderVehicleDocsStatus();
         vehicleInfo.textContent = `${vehiclesCatalog.length} vehiculos disponibles.`;
+        clearCsvRetryTimer('vehicles');
     } catch (err) {
-        vehiclesCatalog = [];
-        loadVehicles([]);
-        vehicleInfo.textContent = `No se pudieron cargar vehiculos. (${err.message})`;
+        if (vehiclesCatalog.length > 0) {
+            vehicleInfo.textContent = `Conexion inestable. Mostrando ultima lista de vehiculos (${vehiclesCatalog.length}). Reintentando...`;
+            loadVehicles(vehiclesCatalog);
+        } else {
+            vehiclesCatalog = [];
+            loadVehicles([]);
+            vehicleInfo.textContent = `No se pudieron cargar vehiculos. (${err.message})`;
+        }
+        scheduleCsvAutoRetry('vehicles', loadVehiclesFromSheet);
     }
 }
 
 async function loadDriversFromSheet() {
     try {
-        const response = await fetch(buildNoCacheUrl(DRIVERS_CSV_URL), { cache: 'no-store' });
-        if (!response.ok) throw new Error('No se pudo obtener conductores.');
-
-        const csvText = await response.text();
+        const csvText = await fetchCsvTextWithRetry(DRIVERS_CSV_URL, 'conductores');
         const rows = parseCSV(csvText);
         if (rows.length < 2) throw new Error('No hay datos de conductores.');
 
@@ -1956,17 +2153,20 @@ async function loadDriversFromSheet() {
             return item;
         });
 
-        driversCatalog = data.filter((item) => {
-            if (!item.nombre) return false;
-            const statusText = normalizeText(item.status);
-            return statusText !== 'disabled' && statusText !== 'inactivo' && statusText !== 'desvinculado';
-        });
+        driversCatalog = data.filter((item) => item.nombre && normalizeText(item.status) === 'enabled');
         loadDrivers(driversCatalog);
         driverInfo.textContent = `${driversCatalog.length} conductores disponibles.`;
+        clearCsvRetryTimer('drivers');
     } catch (err) {
-        driversCatalog = [];
-        loadDrivers([]);
-        driverInfo.textContent = `No se pudieron cargar conductores. (${err.message})`;
+        if (driversCatalog.length > 0) {
+            driverInfo.textContent = `Conexion inestable. Mostrando ultima lista de conductores (${driversCatalog.length}). Reintentando...`;
+            loadDrivers(driversCatalog);
+        } else {
+            driversCatalog = [];
+            loadDrivers([]);
+            driverInfo.textContent = `No se pudieron cargar conductores. (${err.message})`;
+        }
+        scheduleCsvAutoRetry('drivers', loadDriversFromSheet);
     }
 }
 
@@ -1998,10 +2198,7 @@ function renderFleet() {
 
 async function loadFleetFromSheet() {
     try {
-        const response = await fetch(buildNoCacheUrl(FLEET_CSV_URL), { cache: 'no-store' });
-        if (!response.ok) throw new Error('No se pudo obtener el parque automotor.');
-
-        const csvText = await response.text();
+        const csvText = await fetchCsvTextWithRetry(FLEET_CSV_URL, 'parque automotor');
         const rows = parseCSV(csvText);
         if (rows.length < 2) throw new Error('No hay datos del parque automotor.');
 
@@ -2030,13 +2227,21 @@ async function loadFleetFromSheet() {
         fleetStatus.textContent = `${fleetRows.length} registros vinculados disponibles.`;
         renderFleet();
         renderVehicleDocsStatus();
+        clearCsvRetryTimer('fleet');
     } catch (err) {
-        fleetHeaders = [];
-        fleetRows = [];
-        fleetRecords = [];
-        fleetStatus.textContent = `No se pudo cargar el parque automotor. (${err.message})`;
-        renderFleet();
-        renderVehicleDocsStatus();
+        if (fleetRows.length > 0) {
+            fleetStatus.textContent = `Conexion inestable. Mostrando ultimo parque automotor (${fleetRows.length}). Reintentando...`;
+            renderFleet();
+            renderVehicleDocsStatus();
+        } else {
+            fleetHeaders = [];
+            fleetRows = [];
+            fleetRecords = [];
+            fleetStatus.textContent = `No se pudo cargar el parque automotor. (${err.message})`;
+            renderFleet();
+            renderVehicleDocsStatus();
+        }
+        scheduleCsvAutoRetry('fleet', loadFleetFromSheet);
     }
 }
 
@@ -2078,10 +2283,7 @@ function renderSicovRows() {
 
 async function loadSicovFromSheet() {
     try {
-        const response = await fetch(buildNoCacheUrl(SICOV_CSV_URL), { cache: 'no-store' });
-        if (!response.ok) throw new Error('No se pudo obtener SICOV.');
-
-        const csvText = await response.text();
+        const csvText = await fetchCsvTextWithRetry(SICOV_CSV_URL, 'SICOV');
         const rows = parseCSV(csvText);
         if (rows.length < 2) throw new Error('No hay datos de SICOV.');
 
@@ -2096,11 +2298,18 @@ async function loadSicovFromSheet() {
 
         sicovStatus.textContent = `${sicovRows.length} registros SICOV disponibles.`;
         renderSicovRows();
+        clearCsvRetryTimer('sicov');
     } catch (err) {
-        sicovHeaders = [];
-        sicovRows = [];
-        sicovStatus.textContent = `No se pudo cargar SICOV. (${err.message})`;
-        renderSicovRows();
+        if (sicovRows.length > 0) {
+            sicovStatus.textContent = `Conexion inestable. Mostrando ultimo SICOV (${sicovRows.length}). Reintentando...`;
+            renderSicovRows();
+        } else {
+            sicovHeaders = [];
+            sicovRows = [];
+            sicovStatus.textContent = `No se pudo cargar SICOV. (${err.message})`;
+            renderSicovRows();
+        }
+        scheduleCsvAutoRetry('sicov', loadSicovFromSheet);
     }
 }
 
@@ -2174,11 +2383,18 @@ async function loadExternalVehiculoConductores() {
 
         externalVcStatus.textContent = `${externalVcRows.length} registros disponibles.`;
         renderExternalVcRows();
+        clearCsvRetryTimer('externalVc');
     } catch (err) {
-        externalVcHeaders = [];
-        externalVcRows = [];
-        externalVcStatus.textContent = `No se pudo cargar vehiculo_conductores. (${err.message})`;
-        renderExternalVcRows();
+        if (externalVcRows.length > 0) {
+            externalVcStatus.textContent = `Conexion inestable. Mostrando ultimo biometrico (${externalVcRows.length}). Reintentando...`;
+            renderExternalVcRows();
+        } else {
+            externalVcHeaders = [];
+            externalVcRows = [];
+            externalVcStatus.textContent = `No se pudo cargar vehiculo_conductores. (${err.message})`;
+            renderExternalVcRows();
+        }
+        scheduleCsvAutoRetry('externalVc', loadExternalVehiculoConductores);
     } finally {
         externalVcLoading = false;
     }
@@ -2265,6 +2481,8 @@ async function init() {
 
     currentUser = user;
     userEmail.textContent = user.email;
+    isControlOperatorUser = detectControlOperatorUser();
+    applyControlAuditVisibility();
     selectedItineraryGroup = getStoredItineraryGroup();
     renderNetworkBadge();
     startLiveClock24();
@@ -2275,6 +2493,8 @@ async function init() {
     loadItineraries();
     dispatchDateFilter.value = getCurrentDateKeyBogota();
     salidasDateFilter.value = dispatchDateFilter.value;
+    controlAuditDateFilter.value = dispatchDateFilter.value;
+    dailyReportDateFilter.value = dispatchDateFilter.value;
     dispatchManagerFilter.value = '';
     dispatchItineraryFilter.value = '';
     try {
@@ -2346,6 +2566,8 @@ async function loadDispatches() {
     const activeDate = getActiveDispatchDateKey();
     dispatchDateFilter.value = activeDate;
     salidasDateFilter.value = activeDate;
+    controlAuditDateFilter.value = activeDate;
+    dailyReportDateFilter.value = activeDate;
 
     let data = [];
     try {
@@ -2360,10 +2582,12 @@ async function loadDispatches() {
             renderItineraryFilter(dispatchesCache);
             renderDispatchFilters(dispatchesCache);
             renderMissingItineraryFilter(dispatchesCache);
+            renderControlAuditItineraryFilter();
             renderDispatches();
             renderMissingPassengers();
             renderSalidas();
             renderQuickRecentDispatches();
+            renderControlAuditList();
             alert(`No se pudo consultar la base de datos. Mostrando respaldo local (${cached.length} despachos).`);
             return;
         }
@@ -2379,10 +2603,12 @@ async function loadDispatches() {
         renderItineraryFilter([]);
         renderDispatchFilters([]);
         renderMissingItineraryFilter([]);
+        renderControlAuditItineraryFilter();
         renderQuickRecentDispatches();
         dispatchesList.innerHTML = '<div class="no-tasks">No hay despachos registrados.</div>';
         salidasList.innerHTML = '<div class="no-tasks">No hay salidas disponibles.</div>';
         missingPassengerList.innerHTML = '<div class="no-tasks">No hay viajes sin pasajeros.</div>';
+        renderControlAuditList();
         return;
     }
 
@@ -2391,10 +2617,12 @@ async function loadDispatches() {
     renderItineraryFilter(dispatchesCache);
     renderDispatchFilters(dispatchesCache);
     renderMissingItineraryFilter(dispatchesCache);
+    renderControlAuditItineraryFilter();
     renderDispatches();
     renderMissingPassengers();
     renderSalidas();
     renderQuickRecentDispatches();
+    renderControlAuditList();
 }
 
 function renderDispatches() {
@@ -2476,14 +2704,20 @@ function renderDispatches() {
                     ${isCanceled ? 'Cancelado' : 'Activo'}
                 </span>
             </div>
-            <p><b>Hora salida:</b> ${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}</p>
+            <p><b>Hora salida:</b>
+                <span class="${(isCanceled || !canEdit) ? '' : 'inline-edit-hour'}"
+                      ${(isCanceled || !canEdit) ? '' : `onclick="editDispatchHour(${dispatch.id}, this)"`}
+                      title="${escapeHtml((isCanceled || !canEdit) ? '' : 'Click para editar hora de salida')}">
+                    ${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}
+                </span>
+            </p>
             <p><b>Itinerario:</b> ${escapeHtml(dispatch.route)}</p>
             <p><b>Vehiculo:</b> ${escapeHtml(dispatch.vehicle)}</p>
             <p><b>Conductor:</b> ${escapeHtml(dispatch.driver)}</p>
             <p><b>Pasajeros:</b> ${escapeHtml(dispatch.passenger_count ?? '-')}</p>
             <p><b>Gestor:</b> ${escapeHtml(dispatch.manager)}</p>
             <p><b>Fecha salida:</b> ${escapeHtml(formatDate(dispatch.departure_time))}</p>
-            <p><b>Observaciones:</b> ${escapeHtml(getVisibleDispatchNotes(dispatch.notes) || '-')}</p>
+            <p><b>Observaciones:</b> <span class="notes-text">${renderDispatchNotesHtml(dispatch.notes)}</span></p>
             <p><b>Cancelacion:</b> ${isCanceled ? escapeHtml(dispatch.cancellation_note || 'Sin motivo') : '-'}</p>
             <div class="dispatch-actions">
                 <button onclick="editPassengers(${dispatch.id}, ${dispatch.passenger_count})" ${(isCanceled || !canEdit) ? 'disabled' : ''} title="${canEdit ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Editar pasajeros</button>
@@ -2519,7 +2753,7 @@ function renderMissingPassengers() {
                     <p><b>Itinerario:</b> ${escapeHtml(row.route || '-')}</p>
                     <p><b>Vehiculo:</b> ${escapeHtml(row.vehicle || '-')}</p>
                     <p><b>Gestor:</b> ${escapeHtml(row.manager || '-')}</p>
-                    <p><b>Observaciones:</b> ${escapeHtml(getVisibleDispatchNotes(row.notes) || '-')}</p>
+                    <p><b>Observaciones:</b> <span class="notes-text">${renderDispatchNotesHtml(row.notes)}</span></p>
                     <div class="dispatch-actions">
                         <button onclick="editPassengers(${row.id}, ${row.passenger_count})" ${canCurrentManagerEditDispatch(row) ? '' : 'disabled'} title="${canCurrentManagerEditDispatch(row) ? '' : 'Solo el gestor que registro este despacho puede editar pasajeros.'}">Ingresar pasajeros</button>
                         <button onclick="editDispatchNotes(${row.id})" ${canCurrentManagerEditDispatch(row) ? '' : 'disabled'} title="${canCurrentManagerEditDispatch(row) ? '' : 'Solo el gestor que registro este despacho puede editar observaciones.'}">Editar observacion</button>
@@ -2537,14 +2771,21 @@ function resetDispatchPaginationAndRender() {
 
 function getFilteredOrderedSalidas() {
     const selectedDate = String(salidasDateFilter.value || '').trim();
+    const search = normalizeText(salidasSearchFilter.value);
     const filtered = itineraryFilter.value
         ? dispatchesCache.filter((item) => String(item.route || '').trim() === itineraryFilter.value)
         : dispatchesCache;
     const withDate = selectedDate
         ? filtered.filter((item) => matchesDispatchDate(item, selectedDate))
         : filtered;
+    const withSearch = search
+        ? withDate.filter((item) => {
+            const bag = normalizeText(`${item.vehicle || ''} ${item.driver || ''}`);
+            return bag.includes(search);
+        })
+        : withDate;
 
-    return [...withDate].sort((a, b) => {
+    return [...withSearch].sort((a, b) => {
         const aTs = getDispatchSortTimestamp(a);
         const bTs = getDispatchSortTimestamp(b);
         if (aTs !== bTs) return bTs - aTs;
@@ -2552,8 +2793,87 @@ function getFilteredOrderedSalidas() {
     });
 }
 
+function getPassengersTotal(rows) {
+    return (rows || []).reduce((acc, row) => {
+        const value = Number(row?.passenger_count);
+        return acc + (Number.isInteger(value) && value > 0 ? value : 0);
+    }, 0);
+}
+
+function getVehicleIdentityCodes(vehicleRow) {
+    const codes = new Set();
+    [vehicleRow?.descripcion, vehicleRow?.id, vehicleRow?.placa].forEach((value) => {
+        const code = normalizeCode(value);
+        if (code) codes.add(code);
+    });
+    return codes;
+}
+
+function getDispatchVehicleCode(dispatchRow) {
+    return normalizeCode(dispatchRow?.vehicle || '');
+}
+
+function getVehicleReportNumber(vehicleRow) {
+    return String(vehicleRow?.descripcion || vehicleRow?.id || vehicleRow?.placa || '-').trim() || '-';
+}
+
+function renderDailyLaborReport() {
+    if (!vehiclesCatalog.length) {
+        dailyLaborReport.innerHTML = '<p class="driver-info">Informe diario: no hay catalogo de vehiculos cargado.</p>';
+        return;
+    }
+
+    const todayKey = getCurrentDateKeyBogota();
+    const todayRows = dispatchesCache.filter((row) => matchesDispatchDate(row, todayKey));
+    const tripCountsByCode = new Map();
+    todayRows.forEach((row) => {
+        const code = getDispatchVehicleCode(row);
+        if (!code) return;
+        tripCountsByCode.set(code, (tripCountsByCode.get(code) || 0) + 1);
+    });
+
+    const vehicleTripRows = vehiclesCatalog.map((vehicleRow) => {
+        const codes = Array.from(getVehicleIdentityCodes(vehicleRow));
+        const trips = codes.reduce((acc, code) => acc + (tripCountsByCode.get(code) || 0), 0);
+        return {
+            vehicleNumber: getVehicleReportNumber(vehicleRow),
+            trips
+        };
+    }).sort((a, b) => {
+        const aNum = Number(a.vehicleNumber);
+        const bNum = Number(b.vehicleNumber);
+        if (!Number.isNaN(aNum) && !Number.isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+        return String(a.vehicleNumber).localeCompare(String(b.vehicleNumber), 'es', { numeric: true, sensitivity: 'base' });
+    });
+
+    dailyLaborReport.innerHTML = `
+        <div class="user-guide"><b>Informe del dia actual (${escapeHtml(todayKey)}):</b> vehiculo y cantidad de viajes.</div>
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Vehiculo</th>
+                        <th>Viajes hoy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${vehicleTripRows.map((row) => `
+                        <tr class="${row.trips <= 0 ? 'dispatch-table-row-missing-passengers' : ''}">
+                            <td>${escapeHtml(row.vehicleNumber)}</td>
+                            <td>${escapeHtml(row.trips <= 0 ? 'No laborando (0)' : `${row.trips} viaje(s)`)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
 function renderSalidas() {
     const orderedDispatches = getFilteredOrderedSalidas();
+    const passengersTotal = getPassengersTotal(orderedDispatches);
+    salidasPassengerTotal.textContent = `Total pasajeros filtrados: ${passengersTotal}`;
+    renderDailyLaborReport();
     if (orderedDispatches.length === 0) {
         salidasList.innerHTML = '<div class="no-tasks">No hay salidas para ese itinerario.</div>';
         return;
@@ -2588,10 +2908,14 @@ function renderSalidas() {
                         ].filter(Boolean).join(' ');
                         return `
                             <tr class="${rowClass}">
-                                <td>${escapeHtml(getVisibleDispatchNotes(dispatch.notes) || '-')}</td>
+                                <td class="notes-cell"><span class="notes-text">${renderDispatchNotesHtml(dispatch.notes)}</span></td>
                                 <td>${escapeHtml(formatDate(dispatch.departure_time || dispatch.created_at))}</td>
                                 <td>${escapeHtml(dispatch.vehicle || '-')}</td>
-                                <td>${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}</td>
+                                <td class="${(isCanceled || !canEdit) ? '' : 'inline-edit-hour'}"
+                                    ${(isCanceled || !canEdit) ? '' : `onclick="editDispatchHour(${dispatch.id}, this)"`}
+                                    title="${escapeHtml((isCanceled || !canEdit) ? '' : 'Click para editar hora de salida')}">
+                                    ${escapeHtml(formatTime24(dispatch.hora_salida || dispatch.departure_time))}
+                                </td>
                                 <td>${escapeHtml(dispatch.route || '-')}</td>
                                 <td>${escapeHtml(dispatch.passenger_count ?? '-')}</td>
                                 <td>${escapeHtml(dispatch.driver || '-')}</td>
@@ -2619,6 +2943,22 @@ function exportSalidasToExcel() {
         alert('No hay salidas para exportar con los filtros actuales.');
         return;
     }
+    const passengersTotal = getPassengersTotal(rows);
+    const workedCodes = new Set(
+        dispatchesCache
+            .map((row) => getDispatchVehicleCode(row))
+            .filter(Boolean)
+    );
+    let laborandoCount = 0;
+    let noLaborandoCount = 0;
+    if (vehiclesCatalog.length > 0) {
+        vehiclesCatalog.forEach((vehicleRow) => {
+            const codes = getVehicleIdentityCodes(vehicleRow);
+            const isWorking = Array.from(codes).some((code) => workedCodes.has(code));
+            if (isWorking) laborandoCount += 1;
+            else noLaborandoCount += 1;
+        });
+    }
 
     const header = ['Estado', 'Fecha', 'Hora', 'Itinerario', 'Vehiculo', 'Conductor', 'Gestor', 'Observaciones'];
     const csvRows = [
@@ -2635,7 +2975,12 @@ function exportSalidasToExcel() {
                 dispatch.manager || '-',
                 getVisibleDispatchNotes(dispatch.notes) || '-'
             ].map(toCsvCell).join(',');
-        })
+        }),
+        '',
+        ['TOTAL VEHICULOS', String(vehiclesCatalog.length)].map(toCsvCell).join(','),
+        ['VEHICULOS LABORANDO', String(laborandoCount)].map(toCsvCell).join(','),
+        ['VEHICULOS NO LABORANDO', String(noLaborandoCount)].map(toCsvCell).join(','),
+        ['TOTAL PASAJEROS FILTRADOS', String(passengersTotal)].map(toCsvCell).join(',')
     ];
 
     const csvContent = `\uFEFF${csvRows.join('\r\n')}`;
@@ -2701,8 +3046,28 @@ managerItineraryGroup.addEventListener('change', () => {
     updateManagerStepGuide();
 });
 itineraryFilter.addEventListener('change', renderSalidas);
+salidasSearchFilter.addEventListener('input', renderSalidas);
 salidasDateFilter.addEventListener('change', async () => {
     dispatchDateFilter.value = String(salidasDateFilter.value || '').trim() || getCurrentDateKeyBogota();
+    controlAuditDateFilter.value = dispatchDateFilter.value;
+    dailyReportDateFilter.value = dispatchDateFilter.value;
+    await loadDispatches();
+});
+controlAuditDateFilter.addEventListener('change', async () => {
+    dispatchDateFilter.value = String(controlAuditDateFilter.value || '').trim() || getCurrentDateKeyBogota();
+    salidasDateFilter.value = dispatchDateFilter.value;
+    dailyReportDateFilter.value = dispatchDateFilter.value;
+    await loadDispatches();
+});
+controlAuditItineraryFilter.addEventListener('change', renderControlAuditList);
+controlAuditSearchFilter.addEventListener('input', renderControlAuditList);
+refreshControlAuditBtn.addEventListener('click', async () => {
+    await refreshDispatchDataOnSessionOpen();
+});
+dailyReportDateFilter.addEventListener('change', async () => {
+    dispatchDateFilter.value = String(dailyReportDateFilter.value || '').trim() || getCurrentDateKeyBogota();
+    salidasDateFilter.value = dispatchDateFilter.value;
+    controlAuditDateFilter.value = dispatchDateFilter.value;
     await loadDispatches();
 });
 exportSalidasBtn.addEventListener('click', exportSalidasToExcel);
@@ -2716,6 +3081,20 @@ sessionDispatchBtn.addEventListener('click', async () => {
 });
 sessionSalidasBtn.addEventListener('click', async () => {
     setSessionView('salidas');
+    await refreshDispatchDataOnSessionOpen();
+});
+sessionControlAuditBtn.addEventListener('click', async () => {
+    if (!isControlOperatorUser) return;
+    setSessionView('control-audit');
+    await refreshDispatchDataOnSessionOpen();
+});
+sessionDailyReportBtn.addEventListener('click', async () => {
+    setSessionView('daily-report');
+    const today = getCurrentDateKeyBogota();
+    dispatchDateFilter.value = today;
+    salidasDateFilter.value = today;
+    controlAuditDateFilter.value = today;
+    dailyReportDateFilter.value = today;
     await refreshDispatchDataOnSessionOpen();
 });
 sessionMissingBtn.addEventListener('click', () => setSessionView('missing'));
@@ -2753,6 +3132,13 @@ refreshExternalVcBtn.addEventListener('click', () => refreshCsv('external-vc'));
 window.addEventListener('offline', () => updateNetworkStatus(true));
 window.addEventListener('online', async () => {
     updateNetworkStatus(true);
+    await Promise.allSettled([
+        loadVehiclesFromSheet(),
+        loadDriversFromSheet(),
+        loadFleetFromSheet(),
+        loadSicovFromSheet(),
+        loadExternalVehiculoConductores()
+    ]);
     await syncPendingDispatchQueue(true);
 });
 window.addEventListener('visibilitychange', () => {
@@ -2834,11 +3220,13 @@ dispatchForm.addEventListener('submit', async (e) => {
     const confirmMessage = `Confirma el despacho:\nVehiculo: ${payload.vehicle}\nConductor: ${payload.driver}\nRuta: ${payload.route}\nFecha/Hora: ${departureDate.value} ${departureTime.value}`;
     const confirmDispatch = await openDispatchConfirmModal(confirmMessage, 'Confirmar despacho');
     if (!confirmDispatch) return;
+    let skipExternalByWindow = false;
 
     if (!hasInternet) {
         const pending = enqueuePendingDispatch({
             payload,
-            appsScriptPayload
+            appsScriptPayload,
+            skipExternalByWindow
         });
         alert(`Despacho guardado en modo local. Pendientes por sincronizar: ${pending}.`);
     } else {
@@ -2847,6 +3235,9 @@ dispatchForm.addEventListener('submit', async (e) => {
             if (validation.shouldConfirm) {
                 const proceed = await openDispatchConfirmModal(validation.message);
                 if (!proceed) return;
+                // Si el usuario decide continuar en ventana de 30 min, guardamos
+                // pero bloqueamos el envio externo para evitar errores duplicados.
+                skipExternalByWindow = true;
             }
         } catch (validationErr) {
             alert(`No se pudo validar ventana de 30 minutos. (${validationErr.message})`);
@@ -2860,7 +3251,9 @@ dispatchForm.addEventListener('submit', async (e) => {
             return;
         }
 
-        if (!appsScriptPayload.mId || !appsScriptPayload.itinerary || !appsScriptPayload.drvId) {
+        if (skipExternalByWindow) {
+            alert('Despacho registrado. No se envio al servicio externo por ventana de 30 minutos.');
+        } else if (!appsScriptPayload.mId || !appsScriptPayload.itinerary || !appsScriptPayload.drvId) {
             alert('Despacho registrado. No se envio al servicio externo porque faltan IDs.');
         } else {
             try {
@@ -3013,6 +3406,228 @@ window.editDispatchNotes = async function (id) {
     await loadDispatches();
 };
 
+window.editDispatchHour = async function (id, cellEl) {
+    const { data: dispatchRow, error: dispatchError } = await sb
+        .from('dispatches')
+        .select('id, user_id, manager, hora_salida, departure_time')
+        .eq('id', id)
+        .eq('user_id', currentUser.id)
+        .limit(1)
+        .maybeSingle();
+
+    if (dispatchError) {
+        alert(dispatchError.message);
+        return;
+    }
+
+    if (!dispatchRow) {
+        alert('No se encontro el despacho.');
+        return;
+    }
+
+    if (!canCurrentManagerEditDispatch(dispatchRow)) {
+        alert('Solo el gestor que registro este despacho puede editar la hora.');
+        return;
+    }
+
+    const currentHour = formatTime24(dispatchRow.hora_salida || dispatchRow.departure_time, '');
+    const nextHour = await pickDispatchHourNearCell(currentHour || '', cellEl);
+    if (!nextHour) return;
+
+    const confirmUpdate = await openDispatchConfirmModal(
+        `¿Confirmas actualizar la hora de salida a ${nextHour}?`,
+        'Si, guardar'
+    );
+    if (!confirmUpdate) return;
+
+    const dateKey = getStoredDateKey(dispatchRow);
+    const nextDepartureIso = dateKey ? `${dateKey}T${nextHour}:00-05:00` : dispatchRow.departure_time;
+    const updatePayload = {
+        hora_salida: `${nextHour}:00`,
+        departure_time: nextDepartureIso
+    };
+
+    const { error } = await sb
+        .from('dispatches')
+        .update(updatePayload)
+        .eq('id', id)
+        .eq('user_id', currentUser.id);
+
+    if (error) {
+        alert(error.message);
+        return;
+    }
+
+    await loadDispatches();
+};
+
+function getControlAuditAuthorLabel() {
+    const metadata = currentUser?.user_metadata || {};
+    return String(
+        metadata.display_name ||
+        metadata.full_name ||
+        metadata.username ||
+        currentUser?.email ||
+        'control'
+    ).trim();
+}
+
+window.saveControlAuditComment = async function (id) {
+    if (!isControlOperatorUser) {
+        alert('No tienes permisos de control para auditar viajes.');
+        return;
+    }
+
+    const commentEl = document.getElementById(`auditComment-${id}`);
+    const presetEl = document.getElementById(`auditPreset-${id}`);
+    const saveBtn = document.getElementById(`auditSaveBtn-${id}`);
+    if (!commentEl || !presetEl) {
+        alert('No se pudo leer la fila de auditoria.');
+        return;
+    }
+
+    const preset = String(presetEl.value || '').trim();
+    const extraText = String(commentEl.value || '').trim();
+    const comment = [preset, extraText].filter(Boolean).join(' - ');
+    if (!comment) {
+        alert('Selecciona un item o escribe comentario para guardar.');
+        return;
+    }
+
+    const target = dispatchesCache.find((row) => Number(row.id) === Number(id));
+    if (!target) {
+        alert('No se encontro el despacho a comentar.');
+        return;
+    }
+
+    const baseNotes = String(target.notes || '').trim();
+    const author = getControlAuditAuthorLabel();
+    const stamp = new Date().toLocaleString('es-CO', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+    const entry = `[${stamp}] ${author} comento: ${comment}`;
+    const nextNotes = baseNotes ? `${baseNotes}\n${entry}` : entry;
+
+    if (saveBtn) saveBtn.disabled = true;
+    const { error } = await sb
+        .from('dispatches')
+        .update({ notes: nextNotes })
+        .eq('id', id)
+        .eq('user_id', target.user_id);
+    if (saveBtn) saveBtn.disabled = false;
+
+    if (error) {
+        alert(error.message);
+        return;
+    }
+
+    dispatchesCache = dispatchesCache.map((row) => {
+        if (Number(row.id) !== Number(id)) return row;
+        return { ...row, notes: nextNotes };
+    });
+    renderDispatches();
+    renderSalidas();
+    renderMissingPassengers();
+    renderQuickRecentDispatches();
+    renderControlAuditList();
+    alert('Comentario de auditoria agregado al historial de observaciones.');
+};
+
+function pickDispatchHourNearCell(initialValue = '', anchorEl) {
+    const promptFallback = () => {
+        const manual = prompt('Nueva hora de salida (formato 24h HH:MM):', initialValue || '');
+        if (manual === null) return null;
+        const clean = String(manual || '').trim();
+        return /^\d{2}:\d{2}$/.test(clean) ? clean : null;
+    };
+
+    if (!anchorEl || !document?.body) {
+        return Promise.resolve(promptFallback());
+    }
+
+    return new Promise((resolve) => {
+        if (activeHourPickerCleanup) {
+            activeHourPickerCleanup();
+            activeHourPickerCleanup = null;
+        }
+
+        const pop = document.createElement('div');
+        pop.className = 'hour-picker-popover';
+
+        const input = document.createElement('input');
+        input.type = 'time';
+        input.step = '60';
+        input.value = /^\d{2}:\d{2}$/.test(initialValue) ? initialValue : '';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn-primary';
+        saveBtn.textContent = 'Guardar';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn-secondary';
+        cancelBtn.textContent = 'Cancelar';
+
+        pop.appendChild(input);
+        pop.appendChild(saveBtn);
+        pop.appendChild(cancelBtn);
+        document.body.appendChild(pop);
+
+        const rect = anchorEl.getBoundingClientRect();
+        const popWidth = 260;
+        let left = rect.right + 8;
+        if (left + popWidth > window.innerWidth - 8) {
+            left = Math.max(8, rect.left - popWidth - 8);
+        }
+        const top = Math.min(Math.max(8, rect.top), window.innerHeight - 90);
+        pop.style.left = `${left}px`;
+        pop.style.top = `${top}px`;
+
+        let settled = false;
+        const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('mousedown', onOutsideClick, true);
+            saveBtn.removeEventListener('click', onSave);
+            cancelBtn.removeEventListener('click', onCancel);
+            if (pop.parentElement) pop.parentElement.removeChild(pop);
+            if (activeHourPickerCleanup === cleanup) activeHourPickerCleanup = null;
+        };
+
+        const onSave = () => {
+            const value = String(input.value || '').trim();
+            cleanup();
+            resolve(/^\d{2}:\d{2}$/.test(value) ? value : null);
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        const onOutsideClick = (e) => {
+            if (!pop.contains(e.target)) onCancel();
+        };
+
+        saveBtn.addEventListener('click', onSave);
+        cancelBtn.addEventListener('click', onCancel);
+        document.addEventListener('mousedown', onOutsideClick, true);
+        activeHourPickerCleanup = cleanup;
+
+        input.focus();
+        if (typeof input.showPicker === 'function') {
+            try { input.showPicker(); } catch (err) {}
+        }
+    });
+}
+
 window.logout = async function () {
     try {
         await loadActiveShift();
@@ -3035,6 +3650,10 @@ window.logout = async function () {
 };
 
 init();
+
+
+
+
 
 
 
