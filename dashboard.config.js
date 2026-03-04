@@ -25,3 +25,4 @@
         MANAGER_SHIFT_PAGE_SIZE: 10
     };
 })();
+
